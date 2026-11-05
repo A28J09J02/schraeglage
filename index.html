@@ -111,6 +111,7 @@ input[type=range]{width:100%;accent-color:var(--road)}
 .linkbtn{background:none;border:0;padding:0;color:var(--road);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .status{font-size:14px;color:var(--muted);min-height:1.2em}
 .status.err{color:var(--bad)}
+.busy{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600;background:var(--chip);border-radius:8px;padding:9px 12px}
 
 /* Ergebnis */
 .result{display:flex;flex-direction:column;gap:16px;border-top:3px solid var(--ink);padding-top:16px}
@@ -530,15 +531,12 @@ const PHOTON_WORDS = {
 function bboxStr(p, km) { const n = destPt(p, 0, km)[0], s = destPt(p, 180, km)[0], e = destPt(p, 90, km)[1], w = destPt(p, 270, km)[1]; return `${w.toFixed(4)},${s.toFixed(4)},${e.toFixed(4)},${n.toFixed(4)}`; }
 async function photonTag(tag, word, p, km) {
   const u = `${API.photon}/api/?q=${encodeURIComponent(word)}&osm_tag=${tag}&bbox=${bboxStr(p, km)}&lat=${p[0].toFixed(4)}&lon=${p[1].toFixed(4)}&limit=25`;
-  for (let k = 0; k < 2; k++) {
-    try { const j = await getJSON(u, {}, 9000); return j.features; }
-    catch (e) { await sleep(900); }
-  }
-  return [];
+  try { const j = await getJSON(u, {}, 5000); return j.features; }
+  catch (e) { return []; }
 }
 async function photonPois(points, km, types) {
   const out = [], seen = new Set();
-  for (const p of points) for (const t of types) for (const [tag, word] of PHOTON_WORDS[t] || []) {
+  for (const p of points) for (const t of types) for (const [tag, word] of (PHOTON_WORDS[t] || []).slice(0, t === "fuel" ? 4 : 1)) {
     const fs = await photonTag(tag, word, p, km); await sleep(150);
     fs.forEach(f => { const pr = f.properties, id = pr.osm_type + pr.osm_id; if (seen.has(id)) return; seen.add(id);
       out.push({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: pr.name || (t === "view" ? "Aussichtspunkt" : HL[t]?.label || "Tankstelle"), type: t, id, city: pr.city }); });
@@ -860,56 +858,33 @@ function finish(r, meta) {
   };
   return rt;
 }
+function rebuild(old, r, rp) {
+  const rt = finish({ ...r, variants: old.variants }, { rp, style: old.style, mw: old.mw, toll: old.toll, loop: old.loop, hours: old.hours, name: old.name, start: old.start, hlTypes: old.hlTypes });
+  Object.assign(rt, { id: old.id, cands: old.cands, fuelInfo: old.fuelInfo, wx: old.wx, want: old.want, ringR: old.ringR, hlFailed: old.hlFailed });
+  return rt;
+}
+async function reroute(old, rp) {
+  const r = await routeOnce(rp.map(ll), { profile: old.profile === "osrm" ? "car-vario" : old.profile, mw: old.mw, toll: old.toll });
+  return rebuild(old, r, rp);
+}
 async function computeAB(status) {
   const st = PLAN.start, zi = PLAN.ziel;
   if (!st || !zi) throw new Error("Bitte Start und Ziel wählen – über die Suche oder per Tipp auf die Karte.");
   const style = getStyle(), mw = $("#r-mw").checked, toll = $("#r-toll").checked;
   const vias = PLAN.vias.filter(Boolean).map(v => ({ ...v, kind: "via" }));
-  let stops = [{ ...st, kind: "start" }, ...vias, { ...zi, kind: "ziel" }];
-  const types = getRHL(), nHL = +$("#r-hln").value;
-  let cands = [], hlFailed = false;
-  if (types.length && nHL > 0) {
-    status("Suche Highlights entlang der Strecke …");
-    try {
-      const base = await routeOnce(stops.map(ll), { profile: "car-vario", mw, toll });
-      const pois = await poisAlongRoute(base.coords, types);
-      const c = base.coords, cum = cumul(c), L = cum.at(-1);
-      pois.forEach(p => { const i = nearestIdx(c, ll(p)); p.along = cum[i]; p.off = hav(c[i], ll(p)); p.kind = "hl"; });
-      const pref = t => types.indexOf(t);
-      const chosen = [];
-      for (let k = 1; k <= nHL; k++) {
-        const target = L * k / (nHL + 1), win = L / (nHL + 1) * 0.6;
-        const score = p => pref(p.type) * 0.6 + Math.abs(p.along - target) / win + p.off / 2;
-        const opts = pois.filter(p => !chosen.includes(p) && Math.abs(p.along - target) < win && p.along > 5 && p.along < L - 5)
-          .sort((a, b) => score(a) - score(b));
-        if (opts[0]) chosen.push(opts[0]);
-      }
-      cands = pois.filter(p => !chosen.includes(p)).sort((a, b) => a.along - b.along).slice(0, 60);
-      stops = [stops[0], ...[...vias.map(v => { const i = nearestIdx(c, ll(v)); return { ...v, along: cum[i] }; }), ...chosen].sort((a, b) => a.along - b.along), stops[stops.length - 1]];
-      if (!pois.length) toast("Keine passenden Highlights an dieser Strecke gefunden.");
-    } catch (e) { hlFailed = true; }
-  }
+  const stops = [{ ...st, kind: "start" }, ...vias, { ...zi, kind: "ziel" }];
   const pts = stops.map(ll);
   let r;
   if (style === "kurvig") r = await bestCurvy(pts, mw, toll, status);
   else { status("Berechne schnellste Route …"); r = { ...(await routeOnce(pts, { profile: "car-vario", mw, toll })), rp: pts }; }
-  let rp = rpWithKinds(r.rp, stops);
-  let rt = finish(r, { rp, style, mw, toll, loop: false, name: `${st.name.split(",")[0]} → ${zi.name.split(",")[0]}`, start: $("#r-time").value, hlTypes: types });
-  rt.cands = cands; rt.hlFailed = hlFailed;
-  if ($("#r-fuel").checked) rt = await withFuel(rt, +$("#r-tank").value, status);
+  const rt = finish(r, { rp: rpWithKinds(r.rp, stops), style, mw, toll, loop: false, name: `${st.name.split(",")[0]} → ${zi.name.split(",")[0]}`, start: $("#r-time").value, hlTypes: getRHL() });
+  rt.want = { types: getRHL(), nHL: +$("#r-hln").value, fuel: $("#r-fuel").checked, frac: +$("#r-tank").value };
   return rt;
 }
 async function withFuel(rt, frac, status) {
   try {
     const picks = await planFuel(rt, frac, status);
-    if (picks && picks.length) {
-      status("Plane Tankstopps ein …");
-      const rp = insertByAlong(rt.rp, picks, rt.coords, rt.loop);
-      const r = await routeOnce(rp.map(ll), { profile: rt.profile === "osrm" ? "car-vario" : rt.profile, mw: rt.mw, toll: rt.toll, alt: 0 });
-      const keep = rt;
-      rt = finish({ ...r, variants: keep.variants }, { rp, style: keep.style, mw: keep.mw, toll: keep.toll, loop: keep.loop, hours: keep.hours, name: keep.name, start: keep.start, hlTypes: keep.hlTypes });
-      rt.cands = keep.cands; rt.fuelInfo = keep.fuelInfo;
-    }
+    if (picks && picks.length) { const fi = rt.fuelInfo; const nr = await reroute(rt, insertByAlong(rt.rp, picks, rt.coords)); nr.fuelInfo = fi; return nr; }
   } catch (e) { rt.fuelInfo = { ...(rt.fuelInfo || {}), error: true }; }
   return rt;
 }
@@ -917,45 +892,80 @@ async function computeLoop(status) {
   const st = PLAN.loopStart;
   if (!st) throw new Error("Bitte einen Startpunkt wählen – über die Suche, „Mein Standort“ oder per Tipp auf die Karte.");
   const hours = +hoursEl.value, targetKm = hours * AVG_KURVIG, mw = $("#l-mw").checked;
-  const dirV = getDir(), types = getLHL(), nHL = +$("#l-hln").value;
+  const dirV = getDir();
   const bearing = dirV === "" ? Math.random() * 360 : +dirV + (Math.random() * 30 - 15);
   let R = targetKm / 1.4 / (2 * Math.PI);
   const S0 = ll(st);
   const jit = [1, 2, 3, 4].map(() => [Math.random() * 14 - 7, 0.88 + Math.random() * 0.24]);
   const ringAt = R => { const center = destPt(S0, bearing, R), a0 = brg(center, S0); return jit.map(([da, f], k) => { const p = destPt(center, a0 + (k + 1) * 72 + da, R * f); return { lat: p[0], lon: p[1], kind: "shape" }; }); };
-  let pois = [], hlFailed = false;
-  if (types.length && nHL > 0) {
-    status("Suche Highlights in der Gegend …");
-    try { pois = await poisNear(ringAt(R).map(ll), Math.min(12, Math.max(3, R * 0.55)), types); } catch (e) { hlFailed = true; }
-  }
   let best = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     status(attempt ? "Passe Rundenlänge an …" : "Baue die Runde …");
-    const ring = ringAt(R);
-    // Highlights auf die Ringpunkte legen
-    const used = new Set(); const pref = t => types.indexOf(t);
-    const slots = ring.map((p, i) => {
-      const opts = pois.filter(q => !used.has(q.id)).map(q => ({ q, d: hav(ll(p), ll(q)) })).filter(o => o.d < R * 0.5).sort((a, b) => (a.d / R + pref(a.q.type) * 0.25) - (b.d / R + pref(b.q.type) * 0.25));
-      return { i, o: opts[0] };
-    }).filter(s => s.o).sort((a, b) => a.o.d - b.o.d);
-    for (const s of slots.slice(0, nHL)) { if (used.has(s.o.q.id)) continue; used.add(s.o.q.id); ring[s.i] = { ...s.o.q, kind: "hl" }; }
-    const stops = [{ ...st, kind: "start" }, ...ring, { ...st, kind: "ziel" }];
+    const stops = [{ ...st, kind: "start" }, ...ringAt(R), { ...st, kind: "ziel" }];
     let r;
     try { r = await routeOnce(stops.map(ll), { profile: "car-vario", mw, toll: false }); }
     catch (e) { if (best) break; throw e; }
-    r.rp = stops.map(ll);
     const ratio = r.km / targetKm;
-    const cand = { r, stops, ratio };
-    if (!best || Math.abs(ratio - 1) < Math.abs(best.ratio - 1)) best = cand;
+    if (!best || Math.abs(ratio - 1) < Math.abs(best.ratio - 1)) best = { r, stops, ratio, R };
     if (Math.abs(ratio - 1) < 0.15) break;
     R *= Math.pow(1 / ratio, 0.9);
   }
-  const { r, stops } = best;
-  let rt = finish(r, { rp: stops, style: "kurvig", mw, toll: false, loop: true, hours, name: `Rundtour ab ${st.name.split(",")[0]}`, start: $("#l-time").value, hlTypes: types });
-  rt.hlFailed = hlFailed;
-  rt.cands = pois.filter(p => !stops.some(s => s.id === p.id)).map(p => { const i = nearestIdx(rt.coords, ll(p)); return { ...p, kind: "hl", off: hav(rt.coords[i], ll(p)) }; }).filter(p => p.off < 4).sort((a, b) => a.off - b.off).slice(0, 40);
-  if ($("#l-fuel").checked) rt = await withFuel(rt, +$("#l-tank").value, status);
+  const rt = finish(best.r, { rp: best.stops, style: "kurvig", mw, toll: false, loop: true, hours, name: `Rundtour ab ${st.name.split(",")[0]}`, start: $("#l-time").value, hlTypes: getLHL() });
+  rt.ringR = best.R;
+  rt.want = { types: getLHL(), nHL: +$("#l-hln").value, fuel: $("#l-fuel").checked, frac: +$("#l-tank").value };
   return rt;
+}
+function chooseHighlights(rt, pois, w) {
+  const pref = t => w.types.indexOf(t), chosen = [];
+  if (rt.loop) {
+    const R = rt.ringR || 10, used = new Set();
+    const slots = rt.rp.map((p, i) => ({ p, i })).filter(x => x.p.kind === "shape").map(x => {
+      const o = pois.map(q => ({ q, d: hav(ll(x.p), ll(q)) })).filter(o => o.d < R * 0.6).sort((a, b) => (a.d / R + pref(a.q.type) * 0.25) - (b.d / R + pref(b.q.type) * 0.25))[0];
+      return { i: x.i, o };
+    }).filter(s => s.o).sort((a, b) => a.o.d - b.o.d);
+    for (const s of slots) { if (chosen.length >= w.nHL) break; if (used.has(s.o.q.id)) continue; used.add(s.o.q.id); chosen.push({ i: s.i, q: s.o.q }); }
+    return chosen;
+  }
+  const c = thin(rt.coords, 0.2), cum = cumul(c), L = cum.at(-1);
+  pois.forEach(p => { const i = nearestIdx(c, ll(p)); p.along = cum[i]; p.off = hav(c[i], ll(p)); });
+  for (let k = 1; k <= w.nHL; k++) {
+    const target = L * k / (w.nHL + 1), win = L / (w.nHL + 1) * 0.6;
+    const score = p => pref(p.type) * 0.6 + Math.abs(p.along - target) / win + p.off / 2;
+    const opt = pois.filter(p => !chosen.some(x => x.q === p) && Math.abs(p.along - target) < win && p.along > 3 && p.along < L - 3).sort((a, b) => score(a) - score(b))[0];
+    if (opt) chosen.push({ q: opt });
+  }
+  return chosen;
+}
+let SEQ = 0;
+async function enrich(rt, seq) {
+  const w = rt.want; if (!w) return;
+  const alive = () => seq === SEQ;
+  const show = (r, msg) => { r.busy = msg; CUR = r; renderResult(false); };
+  try {
+    if (w.types.length && w.nHL > 0) {
+      show(rt, "Suche Highlights …");
+      try {
+        const pois = rt.loop ? await poisNear(rt.rp.filter(p => p.kind === "shape").map(ll), Math.min(12, Math.max(3, rt.ringR * 0.55)), w.types)
+                             : await poisAlongRoute(rt.coords, w.types);
+        if (!alive()) return;
+        const chosen = chooseHighlights(rt, pois, w), ids = new Set(chosen.map(x => x.q.id)), th = thin(rt.coords, 0.3);
+        rt.cands = pois.filter(p => !ids.has(p.id)).map(p => { const i = nearestIdx(th, ll(p)); return { ...p, kind: "hl", off: hav(th[i], ll(p)) }; }).filter(p => p.off < 4).sort((a, b) => a.off - b.off).slice(0, 40);
+        if (chosen.length) {
+          show(rt, `Plane ${chosen.length} Highlight${chosen.length > 1 ? "s" : ""} ein …`);
+          let rp;
+          if (rt.loop) { rp = rt.rp.slice(); chosen.forEach(x => rp[x.i] = { ...x.q, kind: "hl" }); }
+          else rp = insertByAlong(rt.rp, chosen.map(x => ({ ...x.q, kind: "hl" })), rt.coords);
+          const nr = await reroute(rt, rp);
+          if (!alive()) return;
+          rt = nr;
+        } else if (!pois.length) toast("Keine passenden Highlights in der Nähe gefunden.");
+      } catch (e) { if (!alive()) return; rt.hlFailed = true; }
+    }
+    if (w.fuel) { show(rt, "Plane Tankstopps …"); rt = await withFuel(rt, w.frac, () => {}); if (!alive()) return; }
+    show(rt, "Hole Wetter für die Strecke …");
+    await addWeather(rt); if (!alive()) return;
+  } catch (e) { if (!alive()) return; }
+  rt.busy = null; CUR = rt; renderResult(false);
 }
 async function addWeather(rt) {
   try {
@@ -1031,7 +1041,7 @@ function gpx(rt) {
 function download(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 
 /* ========== Ergebnis anzeigen ========== */
-function renderResult() {
+function renderResult(fitMap = true) {
   const slot = CUR.loop ? $("#l-result") : $("#r-result");
   (CUR.loop ? $("#r-result") : $("#l-result")).innerHTML = "";
   const rt = CUR, lvl = curveLevel(rt.curv);
@@ -1067,6 +1077,7 @@ function renderResult() {
   const candHtml = rt.cands?.length ? `<details class="more"><summary>Weitere Highlights an der Strecke (${rt.cands.length})</summary><div class="candlist">${rt.cands.map((c, i) => `<div class="cand"><span><b>${esc(c.name)}</b> · ${HL[c.type]?.label}</span><button class="btn ghost small" type="button" data-addc="${i}">Hinzufügen</button></div>`).join("")}</div><p class="note">Grüne Punkte auf der Karte lassen sich auch direkt antippen.</p></details>` : "";
   slot.innerHTML = `<div class="result">
     <div class="rhead"><h2>${esc(rt.name)}</h2></div>
+    ${rt.busy ? `<div class="busy" role="status"><span class="spin"></span> ${esc(rt.busy)}</div>` : ""}
     <div class="stats">
       <div class="stat"><b>${nf0.format(rt.km)}</b><span>km</span></div>
       <div class="stat"><b>${fmtDur(rt.min).replace(" h", "")}</b><span>${rt.min >= 60 ? "Std." : "Fahrzeit"}</span></div>
@@ -1090,19 +1101,16 @@ function renderResult() {
   $("#x-save", slot).addEventListener("click", () => saveForm(rt));
   $("#x-again", slot)?.addEventListener("click", () => run("loop"));
   $("#x-hlretry", slot)?.addEventListener("click", retryHighlights);
-  drawPlanMarkers(); fit(rt.coords);
+  drawPlanMarkers(); if (fitMap) fit(rt.coords);
 }
 async function rerouteCur(rp, msg) {
-  const st = CUR.loop ? $("#l-status") : $("#r-status");
-  st.className = "status"; st.innerHTML = `<span class="spin"></span> ${msg}`;
+  const seq = ++SEQ, old = CUR;
+  old.busy = msg; renderResult(false);
   try {
-    const r = await routeOnce(rp.map(ll), { profile: CUR.profile === "osrm" ? "car-vario" : CUR.profile, mw: CUR.mw, toll: CUR.toll });
-    const old = CUR;
-    CUR = finish({ ...r, variants: old.variants }, { rp, style: old.style, mw: old.mw, toll: old.toll, loop: old.loop, hours: old.hours, name: old.name, start: old.start, hlTypes: old.hlTypes });
-    CUR.cands = old.cands; CUR.fuelInfo = old.fuelInfo; CUR.wx = old.wx;
-    await addWeather(CUR);
-    st.textContent = ""; renderResult();
-  } catch (e) { st.className = "status err"; st.textContent = "Neuberechnung fehlgeschlagen. Bitte gleich noch einmal versuchen."; }
+    const nr = await reroute(old, rp); if (seq !== SEQ) return;
+    await addWeather(nr); if (seq !== SEQ) return;
+    nr.busy = null; CUR = nr; renderResult(false);
+  } catch (e) { if (seq !== SEQ) return; old.busy = null; renderResult(false); toast("Neuberechnung fehlgeschlagen. Bitte gleich noch einmal versuchen."); }
 }
 function removeStop(i) {
   const s = CUR.stops[i];
@@ -1126,16 +1134,17 @@ async function retryHighlights() {
   } catch (e) { b.disabled = false; b.textContent = "Erneut suchen"; toast("Immer noch überlastet. In ein paar Minuten nochmal probieren."); }
 }
 async function run(which) {
+  const seq = ++SEQ;
   const btn = which === "loop" ? $("#l-go") : $("#r-go"), st = which === "loop" ? $("#l-status") : $("#r-status");
   btn.disabled = true; const label = btn.textContent; btn.innerHTML = '<span class="spin"></span> Plane …';
   st.className = "status";
   const status = m => st.innerHTML = `<span class="spin"></span> ${esc(m)}`;
   try {
     const rt = which === "loop" ? await computeLoop(status) : await computeAB(status);
-    status("Hole Wetter für die Strecke …");
-    await addWeather(rt);
+    if (seq !== SEQ) return;
     CUR = rt; st.textContent = ""; renderResult();
     setTimeout(() => (which === "loop" ? $("#l-result") : $("#r-result")).scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    enrich(rt, seq);
   } catch (e) {
     st.className = "status err";
     st.textContent = e.name === "AbortError" ? "Der Routing-Dienst antwortet gerade nicht. Bitte in einer Minute erneut versuchen." : (e.message?.startsWith("Bitte") ? e.message : "Route konnte nicht berechnet werden. Liegen Start und Ziel auf befahrbaren Straßen? Sonst kurz warten und erneut versuchen.");
