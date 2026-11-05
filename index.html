@@ -221,6 +221,9 @@ details.more[open] summary::before{content:"– "}
 
 /* Karte */
 .leaflet-container{font:inherit;background:var(--chip)}
+.leaflet-tile-pane{filter:saturate(.85)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}}
+:root[data-theme="dark"] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
 .mk{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 14px/1 var(--f-display);border:2px solid #fff;box-shadow:0 2px 6px rgb(0 0 0 / .35)}
 .mk svg{width:14px;height:14px}
 .maphint{position:absolute;left:10px;bottom:10px;z-index:500;background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:13px;box-shadow:0 2px 8px rgb(0 0 0 / .2);max-width:calc(100% - 20px)}
@@ -375,7 +378,7 @@ const API = {
   brouter: "https://brouter.de/brouter",
   osrm: "https://router.project-osrm.org/route/v1/driving/",
   photon: "https://photon.komoot.io",
-  overpass: ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter"],
+  overpass: ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"],
   meteo: "https://api.open-meteo.com/v1/forecast"
 };
 const AVG_KURVIG = 52; // km/h auf Landstraße inkl. Ortsdurchfahrten
@@ -456,7 +459,7 @@ function perpKm(p, a, b) {
 function curviness(c) { // Grad Richtungsänderung pro km
   let sum = 0, len = 0, prevB = null, last = c[0];
   for (let i = 1; i < c.length; i++) {
-    const d = hav(last, c[i]); if (d < 0.025) continue;
+    const d = hav(last, c[i]); if (d < 0.1) continue;
     const b = brg(last, c[i]);
     if (prevB !== null) { let x = Math.abs(b - prevB); if (x > 180) x = 360 - x; if (x < 100) sum += x; }
     prevB = b; len += d; last = c[i];
@@ -511,18 +514,20 @@ async function reverse(lat, lon) {
 }
 async function overpass(q) {
   let last;
-  for (const ep of API.overpass) {
-    try { return await getJSON(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 40000); }
-    catch (e) { last = e; }
+  for (let k = 0; k < API.overpass.length; k++) {
+    try { return await getJSON(API.overpass[k], { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 22000); }
+    catch (e) { last = e; await sleep(800); }
   }
   throw last;
 }
-function polyStr(c) { return c.map(p => p[0].toFixed(4) + "," + p[1].toFixed(4)).join(","); }
+function bbAround(p, km) {
+  const n = destPt(p, 0, km)[0], s = destPt(p, 180, km)[0], e = destPt(p, 90, km)[1], w = destPt(p, 270, km)[1];
+  return `(${s.toFixed(4)},${w.toFixed(4)},${n.toFixed(4)},${e.toFixed(4)})`;
+}
 function elToPoi(e, type) {
-  const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; if (lat == null) return null;
+  const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; if (lat == null || !type) return null;
   const t = e.tags || {};
-  let name = t.name || (type === "view" ? "Aussichtspunkt" : HL[type].label);
-  return { lat, lon, name, type, id: e.type + e.id };
+  return { lat, lon, name: t.name || (type === "view" ? "Aussichtspunkt" : HL[type].label), type, id: e.type + e.id };
 }
 function classify(t) {
   if (t.tourism === "viewpoint") return "view";
@@ -534,26 +539,34 @@ function classify(t) {
   if (t.natural === "water") return "lake";
   return null;
 }
-async function poisAlong(c, types, radiusM) {
-  if (!types.length) return [];
-  const poly = polyStr(thin(c, Math.max(1.5, cumul(c).at(-1) / 120)));
-  const parts = types.map(t => `${HL[t].q}(around:${radiusM},${poly});`).join("");
-  const j = await overpass(`[out:json][timeout:35];(${parts});out center 800;`);
+const POI_CACHE = new Map();
+async function poisNear(points, km, types) { // mehrere kleine Suchboxen in einer Abfrage – schnell und schonend
+  if (!types.length || !points.length) return [];
+  const boxes = points.map(p => bbAround(p, km));
+  const q = `[out:json][timeout:20];(${boxes.map(bb => types.map(t => `${HL[t].q}${bb};`).join("")).join("")});out center 900;`;
+  if (POI_CACHE.has(q)) return POI_CACHE.get(q);
+  const j = await overpass(q);
   const seen = new Set();
-  return j.elements.map(e => elToPoi(e, classify(e.tags || {}))).filter(p => p && p.type && !seen.has(p.id) && seen.add(p.id));
+  const res = j.elements.map(e => elToPoi(e, classify(e.tags || {}))).filter(p => p && !seen.has(p.id) && seen.add(p.id));
+  POI_CACHE.set(q, res);
+  return res;
 }
-async function poisInBox(center, km, types) {
-  if (!types.length) return [];
-  const n = destPt(center, 0, km)[0], s = destPt(center, 180, km)[0], e = destPt(center, 90, km)[1], w = destPt(center, 270, km)[1];
-  const bb = `(${s.toFixed(4)},${w.toFixed(4)},${n.toFixed(4)},${e.toFixed(4)})`;
-  const parts = types.map(t => `${HL[t].q}${bb};`).join("");
-  const j = await overpass(`[out:json][timeout:35];(${parts});out center 1500;`);
-  const seen = new Set();
-  return j.elements.map(e => elToPoi(e, classify(e.tags || {}))).filter(p => p && p.type && !seen.has(p.id) && seen.add(p.id));
+function targetsAlong(c, everyKm, maxN) {
+  const cum = cumul(c), L = cum.at(-1);
+  const n = Math.max(1, Math.min(maxN, Math.round(L / everyKm)));
+  return Array.from({ length: n }, (_, k) => { const t = L * (k + 0.5) / n; return c[Math.max(0, cum.findIndex(v => v >= t))]; });
 }
-async function fuelAlong(c) {
-  const poly = polyStr(thin(c, 1));
-  const j = await overpass(`[out:json][timeout:30];nwr["amenity"="fuel"](around:1500,${poly});out center 300;`);
+async function poisAlongRoute(c, types) {
+  const L = cumul(c).at(-1);
+  const pts = targetsAlong(c, 12, 10);
+  const box = Math.min(7, Math.max(3, L / pts.length / 2));
+  const res = await poisNear(pts, box, types);
+  const th = thin(c, 0.3);
+  return res.map(p => { const i = nearestIdx(th, ll(p)); return { ...p, off: hav(th[i], ll(p)) }; }).filter(p => p.off < 2.5);
+}
+async function fuelNear(points) {
+  const boxes = points.map(p => bbAround(p, 3));
+  const j = await overpass(`[out:json][timeout:20];(${boxes.map(bb => `nwr["amenity"="fuel"]${bb};`).join("")});out center 400;`);
   return j.elements.map(e => { const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; const t = e.tags || {}; return lat == null ? null : { lat, lon, name: [t.brand || t.name || "Tankstelle", t["addr:city"]].filter(Boolean).join(" · ") }; }).filter(Boolean);
 }
 async function weather(points) { // points: [{lat,lon,time:Date}]
@@ -576,8 +589,7 @@ const dark = matchMedia("(prefers-color-scheme: dark)");
 let tiles;
 function setTiles() {
   if (tiles) map.removeLayer(tiles);
-  const style = dark.matches ? "dark_all" : "rastertiles/voyager";
-  tiles = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}{r}.png`, { subdomains: "abcd", maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/attributions">CARTO</a>' }).addTo(map);
+  tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
 }
 setTiles(); dark.addEventListener?.("change", setTiles);
 const routeLayer = L.layerGroup().addTo(map), markLayer = L.layerGroup().addTo(map), candLayer = L.layerGroup().addTo(map);
@@ -772,7 +784,14 @@ async function planFuel(rt, tankFrac, status) {
   rt.fuelInfo = { range, reserve, bike: !!bike, need: L > reach };
   if (L <= reach) return null;
   status("Suche Tankstellen an der Strecke …");
-  const stations = (await fuelAlong(c)).map(s => { const i = nearestIdx(c, ll(s)); return { ...s, kind: "fuel", along: cum[i], off: hav(c[i], ll(s)) }; }).filter(s => s.off < 1.5);
+  // Suchpunkte: jeweils die letzten ~50 km vor dem Punkt, an dem es knapp wird
+  const samples = []; let p0 = 0, rch = reach;
+  while (L - p0 > rch && samples.length < 40) {
+    const lim = p0 + rch;
+    for (let a = Math.max(p0 + 10, lim - 50); a <= lim; a += 6) samples.push(c[Math.max(0, cum.findIndex(v => v >= a))]);
+    p0 = lim - 20; rch = range - reserve;
+  }
+  const stations = (await fuelNear(samples)).map(s => { const i = nearestIdx(c, ll(s)); return { ...s, kind: "fuel", along: cum[i], off: hav(c[i], ll(s)) }; }).filter(s => s.off < 1.2);
   const picks = []; let pos = 0;
   while (L - pos > reach) {
     const lim = pos + reach;
@@ -808,13 +827,12 @@ async function computeAB(status) {
   const vias = PLAN.vias.filter(Boolean).map(v => ({ ...v, kind: "via" }));
   let stops = [{ ...st, kind: "start" }, ...vias, { ...zi, kind: "ziel" }];
   const types = getRHL(), nHL = +$("#r-hln").value;
-  let cands = [];
+  let cands = [], hlFailed = false;
   if (types.length && nHL > 0) {
     status("Suche Highlights entlang der Strecke …");
     try {
       const base = await routeOnce(stops.map(ll), { profile: "car-vario", mw, toll });
-      const radius = Math.min(3000, Math.max(1200, base.km * 12));
-      const pois = await poisAlong(base.coords, types, radius);
+      const pois = await poisAlongRoute(base.coords, types);
       const c = base.coords, cum = cumul(c), L = cum.at(-1);
       pois.forEach(p => { const i = nearestIdx(c, ll(p)); p.along = cum[i]; p.off = hav(c[i], ll(p)); p.kind = "hl"; });
       const pref = t => types.indexOf(t);
@@ -829,7 +847,7 @@ async function computeAB(status) {
       cands = pois.filter(p => !chosen.includes(p)).sort((a, b) => a.along - b.along).slice(0, 60);
       stops = [stops[0], ...[...vias.map(v => { const i = nearestIdx(c, ll(v)); return { ...v, along: cum[i] }; }), ...chosen].sort((a, b) => a.along - b.along), stops[stops.length - 1]];
       if (!pois.length) toast("Keine passenden Highlights an dieser Strecke gefunden.");
-    } catch (e) { toast("Highlights konnten gerade nicht geladen werden."); }
+    } catch (e) { hlFailed = true; }
   }
   const pts = stops.map(ll);
   let r;
@@ -837,7 +855,7 @@ async function computeAB(status) {
   else { status("Berechne schnellste Route …"); r = { ...(await routeOnce(pts, { profile: "car-vario", mw, toll })), rp: pts }; }
   let rp = rpWithKinds(r.rp, stops);
   let rt = finish(r, { rp, style, mw, toll, loop: false, name: `${st.name.split(",")[0]} → ${zi.name.split(",")[0]}`, start: $("#r-time").value, hlTypes: types });
-  rt.cands = cands;
+  rt.cands = cands; rt.hlFailed = hlFailed;
   if ($("#r-fuel").checked) rt = await withFuel(rt, +$("#r-tank").value, status);
   return rt;
 }
@@ -863,16 +881,17 @@ async function computeLoop(status) {
   const bearing = dirV === "" ? Math.random() * 360 : +dirV + (Math.random() * 30 - 15);
   let R = targetKm / 1.4 / (2 * Math.PI);
   const S0 = ll(st);
-  let pois = [];
+  const jit = [1, 2, 3, 4].map(() => [Math.random() * 14 - 7, 0.88 + Math.random() * 0.24]);
+  const ringAt = R => { const center = destPt(S0, bearing, R), a0 = brg(center, S0); return jit.map(([da, f], k) => { const p = destPt(center, a0 + (k + 1) * 72 + da, R * f); return { lat: p[0], lon: p[1], kind: "shape" }; }); };
+  let pois = [], hlFailed = false;
   if (types.length && nHL > 0) {
     status("Suche Highlights in der Gegend …");
-    try { pois = await poisInBox(destPt(S0, bearing, R), R * 1.7, types); } catch (e) { toast("Highlights konnten gerade nicht geladen werden."); }
+    try { pois = await poisNear(ringAt(R).map(ll), Math.min(12, Math.max(3, R * 0.55)), types); } catch (e) { hlFailed = true; }
   }
   let best = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     status(attempt ? "Passe Rundenlänge an …" : "Baue die Runde …");
-    const center = destPt(S0, bearing, R), a0 = brg(center, S0);
-    const ring = [1, 2, 3, 4].map(i => { const p = destPt(center, a0 + i * 72 + (Math.random() * 14 - 7), R * (0.88 + Math.random() * 0.24)); return { lat: p[0], lon: p[1], kind: "shape" }; });
+    const ring = ringAt(R);
     // Highlights auf die Ringpunkte legen
     const used = new Set(); const pref = t => types.indexOf(t);
     const slots = ring.map((p, i) => {
@@ -893,6 +912,7 @@ async function computeLoop(status) {
   }
   const { r, stops } = best;
   let rt = finish(r, { rp: stops, style: "kurvig", mw, toll: false, loop: true, hours, name: `Rundtour ab ${st.name.split(",")[0]}`, start: $("#l-time").value, hlTypes: types });
+  rt.hlFailed = hlFailed;
   rt.cands = pois.filter(p => !stops.some(s => s.id === p.id)).map(p => { const i = nearestIdx(rt.coords, ll(p)); return { ...p, kind: "hl", off: hav(rt.coords[i], ll(p)) }; }).filter(p => p.off < 4).sort((a, b) => a.off - b.off).slice(0, 40);
   if ($("#l-fuel").checked) rt = await withFuel(rt, +$("#l-tank").value, status);
   return rt;
@@ -1003,6 +1023,7 @@ function renderResult() {
   const legHtml = legs.length === 1
     ? `<a class="btn gmaps" href="${legs[0].url}" target="_blank" rel="noopener" data-export="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>In Google Maps öffnen</a>`
     : `<p class="note">Die Tour ist zu lang für einen Google-Maps-Link (max. 9 Zwischenpunkte). Fahr sie in ${legs.length} Etappen:</p>` + legs.map((l, i) => `<a class="btn gmaps" href="${l.url}" target="_blank" rel="noopener" data-export="1">Etappe ${i + 1} · km ${nf0.format(l.from)}–${nf0.format(l.to)}</a>`).join("");
+  const hlRetry = rt.hlFailed ? `<div class="callout">Der Highlight-Dienst ist gerade überlastet, deshalb fehlen Stopps. <button class="linkbtn" type="button" id="x-hlretry">Erneut suchen</button></div>` : "";
   const candHtml = rt.cands?.length ? `<details class="more"><summary>Weitere Highlights an der Strecke (${rt.cands.length})</summary><div class="candlist">${rt.cands.map((c, i) => `<div class="cand"><span><b>${esc(c.name)}</b> · ${HL[c.type]?.label}</span><button class="btn ghost small" type="button" data-addc="${i}">Hinzufügen</button></div>`).join("")}</div><p class="note">Grüne Punkte auf der Karte lassen sich auch direkt antippen.</p></details>` : "";
   slot.innerHTML = `<div class="result">
     <div class="rhead"><h2>${esc(rt.name)}</h2></div>
@@ -1014,7 +1035,7 @@ function renderResult() {
     </div>
     <p class="note">${CURVE_TXT[lvl]}${rt.style === "kurvig" && rt.variants > 1 ? ` – die kurvigste von ${rt.variants} Varianten` : ""}. Fahrzeit ohne Pausen.${rt.fallback ? " Ersatz-Routing aktiv, Autobahn/Maut meiden ist dabei nicht garantiert." : ""}</p>
     ${wxHtml}
-    <div class="group"><h3>Stopps</h3><ul class="stops">${stopRows}</ul>${fuelHtml}${candHtml}</div>
+    <div class="group"><h3>Stopps</h3><ul class="stops">${stopRows}</ul>${fuelHtml}${hlRetry}${candHtml}</div>
     <div class="group"><h3>Losfahren</h3><div class="legs">${legHtml}</div>
       ${rt.mw ? `<div class="callout">Google Maps fährt zwischen den Punkten seine eigene Linie. Die Wegpunkte halten dich auf der kurvigen Strecke – stell in Google Maps zusätzlich „Autobahnen vermeiden“ ein.</div>` : ""}
       <div class="btnrow"><button class="btn ghost small" type="button" id="x-save">Speichern</button><button class="btn ghost small" type="button" id="x-share">Teilen</button><button class="btn ghost small" type="button" id="x-gpx">GPX</button>${rt.loop ? `<button class="btn ghost small" type="button" id="x-again">Neue Variante</button>` : ""}</div>
@@ -1028,6 +1049,7 @@ function renderResult() {
   $("#x-share", slot).addEventListener("click", () => shareRoute(rt));
   $("#x-save", slot).addEventListener("click", () => saveForm(rt));
   $("#x-again", slot)?.addEventListener("click", () => run("loop"));
+  $("#x-hlretry", slot)?.addEventListener("click", retryHighlights);
   drawPlanMarkers(); fit(rt.coords);
 }
 async function rerouteCur(rp, msg) {
@@ -1053,6 +1075,15 @@ function addHighlight(i) {
   CUR.cands.splice(i, 1);
   const rp = insertByAlong(CUR.rp, [{ ...c, kind: "hl", along: undefined }], CUR.coords, CUR.loop);
   rerouteCur(rp, `Füge „${c.name}“ hinzu …`);
+}
+async function retryHighlights() {
+  const b = $("#x-hlretry"); b.disabled = true; b.textContent = "Suche …";
+  try {
+    const pois = await poisAlongRoute(CUR.coords, CUR.hlTypes.length ? CUR.hlTypes : ["view", "cafe"]);
+    CUR.cands = pois.filter(p => !CUR.stops.some(s => s.id === p.id)).map(p => ({ ...p, kind: "hl" })).sort((a, b) => a.off - b.off).slice(0, 40);
+    CUR.hlFailed = false; renderResult();
+    toast(CUR.cands.length ? `${CUR.cands.length} Highlights gefunden – grüne Punkte antippen zum Hinzufügen.` : "Keine Highlights an dieser Strecke gefunden.", 4000);
+  } catch (e) { b.disabled = false; b.textContent = "Erneut suchen"; toast("Immer noch überlastet. In ein paar Minuten nochmal probieren."); }
 }
 async function run(which) {
   const btn = which === "loop" ? $("#l-go") : $("#r-go"), st = which === "loop" ? $("#l-status") : $("#r-status");
