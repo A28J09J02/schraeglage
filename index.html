@@ -467,7 +467,7 @@ function curviness(c) { // Grad Richtungsänderung pro km
   }
   return len ? sum / len : 0;
 }
-function curveLevel(cv) { return cv < 22 ? 1 : cv < 35 ? 2 : cv < 50 ? 3 : cv < 70 ? 4 : 5; }
+function curveLevel(cv) { return cv < 50 ? 1 : cv < 75 ? 2 : cv < 95 ? 3 : cv < 120 ? 4 : 5; }
 const CURVE_TXT = ["", "eher gerade", "schwungvoll", "kurvig", "sehr kurvig", "Kurvenparadies"];
 let toastT;
 function toast(msg, ms = 2800) { let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); } t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
