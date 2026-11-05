@@ -477,6 +477,7 @@ async function getJSON(url, opt = {}, ms = 30000) {
   finally { clearTimeout(t); }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))]);
 
 /* ========== Dienste ========== */
 async function brouter(pts, { profile = "car-vario", mw = false, toll = false, alt = 0 } = {}) {
@@ -504,14 +505,22 @@ async function routeOnce(pts, opt) {
 async function geocode(q, near) {
   let u = `${API.photon}/api/?q=${encodeURIComponent(q)}&limit=6&lang=de`;
   if (near) u += `&lat=${near[0].toFixed(3)}&lon=${near[1].toFixed(3)}`;
-  const j = await getJSON(u, {}, 10000);
-  return j.features.map(f => ({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: placeName(f.properties), sub: placeSub(f.properties) }));
+  try {
+    const j = await getJSON(u, {}, 6000);
+    return j.features.map(f => ({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: placeName(f.properties), sub: placeSub(f.properties) }));
+  } catch (e) { // Ersatz: Nominatim
+    const j = await getJSON(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=de&q=${encodeURIComponent(q)}`, {}, 8000);
+    return j.map(r => { const parts = r.display_name.split(", "); return { lat: +r.lat, lon: +r.lon, name: r.name || parts[0], sub: parts.slice(1, 4).join(", ") }; });
+  }
 }
 function placeName(p) { return p.name || [p.street, p.housenumber].filter(Boolean).join(" ") || p.city || "Ort"; }
 function placeSub(p) { return [p.postcode, p.city !== p.name ? p.city : null, p.state, p.country !== "Deutschland" ? p.country : null].filter(Boolean).join(", "); }
 async function reverse(lat, lon) {
-  try { const j = await getJSON(`${API.photon}/reverse?lat=${lat}&lon=${lon}&lang=de`, {}, 8000); const p = j.features[0]?.properties; if (!p) return null; return p.name && p.city && p.name !== p.city ? `${p.name}, ${p.city}` : (p.city || p.name || p.street); }
-  catch (e) { return null; }
+  try { const j = await getJSON(`${API.photon}/reverse?lat=${lat}&lon=${lon}&lang=de`, {}, 6000); const p = j.features[0]?.properties; if (!p) return null; return p.name && p.city && p.name !== p.city ? `${p.name}, ${p.city}` : (p.city || p.name || p.street); }
+  catch (e) {
+    try { const j = await getJSON(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&accept-language=de&lat=${lat}&lon=${lon}`, {}, 8000); const a = j.address || {}; return a.village || a.town || a.city || a.suburb || j.name || null; }
+    catch (e2) { return null; }
+  }
 }
 async function overpass(q) { // alle Spiegelserver parallel, der schnellste gewinnt
   const one = ep => getJSON(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 13000);
@@ -537,7 +546,7 @@ async function photonTag(tag, word, p, km) {
 async function photonPois(points, km, types) {
   const out = [], seen = new Set();
   for (const p of points) for (const t of types) for (const [tag, word] of (PHOTON_WORDS[t] || []).slice(0, t === "fuel" ? 4 : 1)) {
-    const fs = await photonTag(tag, word, p, km); await sleep(150);
+    const fs = await photonTag(tag, word, p, km); await sleep(350);
     fs.forEach(f => { const pr = f.properties, id = pr.osm_type + pr.osm_id; if (seen.has(id)) return; seen.add(id);
       out.push({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: pr.name || (t === "view" ? "Aussichtspunkt" : HL[t]?.label || "Tankstelle"), type: t, id, city: pr.city }); });
   }
@@ -883,7 +892,7 @@ async function computeAB(status) {
 }
 async function withFuel(rt, frac, status) {
   try {
-    const picks = await planFuel(rt, frac, status);
+    const picks = await withTimeout(planFuel(rt, frac, status), 25000);
     if (picks && picks.length) { const fi = rt.fuelInfo; const nr = await reroute(rt, insertByAlong(rt.rp, picks, rt.coords)); nr.fuelInfo = fi; return nr; }
   } catch (e) { rt.fuelInfo = { ...(rt.fuelInfo || {}), error: true }; }
   return rt;
@@ -945,8 +954,8 @@ async function enrich(rt, seq) {
     if (w.types.length && w.nHL > 0) {
       show(rt, "Suche Highlights …");
       try {
-        const pois = rt.loop ? await poisNear(rt.rp.filter(p => p.kind === "shape").map(ll), Math.min(12, Math.max(3, rt.ringR * 0.55)), w.types)
-                             : await poisAlongRoute(rt.coords, w.types);
+        const pois = await withTimeout(rt.loop ? poisNear(rt.rp.filter(p => p.kind === "shape").map(ll), Math.min(12, Math.max(3, rt.ringR * 0.55)), w.types)
+                                               : poisAlongRoute(rt.coords, w.types), 25000);
         if (!alive()) return;
         const chosen = chooseHighlights(rt, pois, w), ids = new Set(chosen.map(x => x.q.id)), th = thin(rt.coords, 0.3);
         rt.cands = pois.filter(p => !ids.has(p.id)).map(p => { const i = nearestIdx(th, ll(p)); return { ...p, kind: "hl", off: hav(th[i], ll(p)) }; }).filter(p => p.off < 4).sort((a, b) => a.off - b.off).slice(0, 40);
