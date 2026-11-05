@@ -512,13 +512,38 @@ async function reverse(lat, lon) {
   try { const j = await getJSON(`${API.photon}/reverse?lat=${lat}&lon=${lon}&lang=de`, {}, 8000); const p = j.features[0]?.properties; if (!p) return null; return p.name && p.city && p.name !== p.city ? `${p.name}, ${p.city}` : (p.city || p.name || p.street); }
   catch (e) { return null; }
 }
-async function overpass(q) {
-  let last;
-  for (let k = 0; k < API.overpass.length; k++) {
-    try { return await getJSON(API.overpass[k], { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 22000); }
-    catch (e) { last = e; await sleep(800); }
+async function overpass(q) { // alle Spiegelserver parallel, der schnellste gewinnt
+  const one = ep => getJSON(ep, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } }, 13000);
+  return await Promise.any(API.overpass.map(one));
+}
+// Ersatz, wenn Overpass überlastet ist: Photon-Suche nach OSM-Kategorie
+const PHOTON_WORDS = {
+  view: [["tourism:viewpoint", "aussicht"], ["tourism:viewpoint", "blick"]],
+  cafe: [["amenity:cafe", "café"], ["amenity:cafe", "cafe"]],
+  castle: [["historic:castle", "burg"], ["historic:castle", "schloss"]],
+  pass: [["mountain_pass:yes", "pass"]],
+  biker: [["amenity:cafe", "biker"], ["amenity:restaurant", "biker"]],
+  beer: [["amenity:biergarten", "biergarten"], ["amenity:biergarten", "keller"]],
+  lake: [["natural:water", "see"]],
+  fuel: [["amenity:fuel", "tankstelle"], ["amenity:fuel", "aral"], ["amenity:fuel", "shell"], ["amenity:fuel", "esso"], ["amenity:fuel", "jet"], ["amenity:fuel", "avia"], ["amenity:fuel", "totalenergies"]]
+};
+function bboxStr(p, km) { const n = destPt(p, 0, km)[0], s = destPt(p, 180, km)[0], e = destPt(p, 90, km)[1], w = destPt(p, 270, km)[1]; return `${w.toFixed(4)},${s.toFixed(4)},${e.toFixed(4)},${n.toFixed(4)}`; }
+async function photonTag(tag, word, p, km) {
+  const u = `${API.photon}/api/?q=${encodeURIComponent(word)}&osm_tag=${tag}&bbox=${bboxStr(p, km)}&lat=${p[0].toFixed(4)}&lon=${p[1].toFixed(4)}&limit=25`;
+  for (let k = 0; k < 2; k++) {
+    try { const j = await getJSON(u, {}, 9000); return j.features; }
+    catch (e) { await sleep(900); }
   }
-  throw last;
+  return [];
+}
+async function photonPois(points, km, types) {
+  const out = [], seen = new Set();
+  for (const p of points) for (const t of types) for (const [tag, word] of PHOTON_WORDS[t] || []) {
+    const fs = await photonTag(tag, word, p, km); await sleep(150);
+    fs.forEach(f => { const pr = f.properties, id = pr.osm_type + pr.osm_id; if (seen.has(id)) return; seen.add(id);
+      out.push({ lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name: pr.name || (t === "view" ? "Aussichtspunkt" : HL[t]?.label || "Tankstelle"), type: t, id, city: pr.city }); });
+  }
+  return out;
 }
 function bbAround(p, km) {
   const n = destPt(p, 0, km)[0], s = destPt(p, 180, km)[0], e = destPt(p, 90, km)[1], w = destPt(p, 270, km)[1];
@@ -545,9 +570,17 @@ async function poisNear(points, km, types) { // mehrere kleine Suchboxen in eine
   const boxes = points.map(p => bbAround(p, km));
   const q = `[out:json][timeout:20];(${boxes.map(bb => types.map(t => `${HL[t].q}${bb};`).join("")).join("")});out center 900;`;
   if (POI_CACHE.has(q)) return POI_CACHE.get(q);
-  const j = await overpass(q);
-  const seen = new Set();
-  const res = j.elements.map(e => elToPoi(e, classify(e.tags || {}))).filter(p => p && !seen.has(p.id) && seen.add(p.id));
+  let res;
+  try {
+    const j = await overpass(q);
+    const seen = new Set();
+    res = j.elements.map(e => elToPoi(e, classify(e.tags || {}))).filter(p => p && !seen.has(p.id) && seen.add(p.id));
+  } catch (e) {
+    const step = points.length / Math.min(4, points.length);
+    const pts = Array.from({ length: Math.min(4, points.length) }, (_, i) => points[Math.floor(i * step + step / 2)]);
+    res = await photonPois(pts, km * (points.length > 4 ? points.length / 4 : 1), types);
+    if (!res.length) throw new Error("POI-Dienste nicht erreichbar");
+  }
   POI_CACHE.set(q, res);
   return res;
 }
@@ -566,7 +599,13 @@ async function poisAlongRoute(c, types) {
 }
 async function fuelNear(points) {
   const boxes = points.map(p => bbAround(p, 3));
-  const j = await overpass(`[out:json][timeout:20];(${boxes.map(bb => `nwr["amenity"="fuel"]${bb};`).join("")});out center 400;`);
+  let j;
+  try { j = await overpass(`[out:json][timeout:20];(${boxes.map(bb => `nwr["amenity"="fuel"]${bb};`).join("")});out center 400;`); }
+  catch (e) { // Ersatz: wenige große Suchfelder über Photon
+    const step = Math.max(1, Math.ceil(points.length / 4));
+    const pts = points.filter((_, i) => i % step === 0);
+    return (await photonPois(pts, 12, ["fuel"])).map(p => ({ ...p, name: [p.name, p.city].filter(Boolean).join(" · ") }));
+  }
   return j.elements.map(e => { const lat = e.lat ?? e.center?.lat, lon = e.lon ?? e.center?.lon; const t = e.tags || {}; return lat == null ? null : { lat, lon, name: [t.brand || t.name || "Tankstelle", t["addr:city"]].filter(Boolean).join(" · ") }; }).filter(Boolean);
 }
 async function weather(points) { // points: [{lat,lon,time:Date}]
@@ -784,6 +823,7 @@ async function planFuel(rt, tankFrac, status) {
   rt.fuelInfo = { range, reserve, bike: !!bike, need: L > reach };
   if (L <= reach) return null;
   status("Suche Tankstellen an der Strecke …");
+  rt.fuelInfo.searched = true;
   // Suchpunkte: jeweils die letzten ~50 km vor dem Punkt, an dem es knapp wird
   const samples = []; let p0 = 0, rch = reach;
   while (L - p0 > rch && samples.length < 40) {
