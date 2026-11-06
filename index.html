@@ -2,10 +2,15 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#1E2320">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Schräglage">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
 <title>Schräglage</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,9 +34,17 @@
   --road:#E0574B; --lane:#F1C443; --scenic:#5DB27F; --warn:#E39A3B; --bad:#EC6A5E; --head:#0B0E0C; --headfg:#E6EAE4; color-scheme:dark}
 
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+html{-webkit-text-size-adjust:100%;touch-action:manipulation}
+*{-webkit-tap-highlight-color:transparent}
+button,.chip,.seg,nav.tabs,.btn,label.check,.brand{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button{touch-action:manipulation}
 body{background:var(--paper);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
+input,select{font-size:16px}
+.btn,.chip,.seg button,nav.tabs button,.iconbtn{transition:transform .08s ease,background-color .15s ease}
+.btn:active,.chip:active,.seg button:active,.iconbtn:active{transform:scale(.97)}
+@media (prefers-reduced-motion:reduce){.btn:active,.chip:active,.seg button:active,.iconbtn:active{transform:none}}
 .shell{display:grid;height:100dvh;grid-template-areas:"head" "map" "panel" "tabs";grid-template-rows:auto 40dvh 1fr auto;grid-template-columns:100%}
 .shell.nomap{grid-template-rows:auto 0 1fr auto}
 .shell.nomap #map{visibility:hidden}
@@ -43,7 +56,7 @@ header{grid-area:head;display:flex;align-items:center;justify-content:space-betw
 .brand small{font:500 12px/1.2 var(--f-body);font-style:normal;letter-spacing:.04em;text-transform:none;opacity:.7}
 .bikepill{font:600 13px/1 var(--f-body);background:transparent;border:1px solid color-mix(in srgb,var(--headfg) 35%,transparent);color:var(--headfg);border-radius:99px;padding:7px 12px;cursor:pointer;white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
 #map{grid-area:map;min-height:0;background:var(--chip);z-index:0}
-.panel{grid-area:panel;overflow-y:auto;min-height:0;background:var(--panel);
+.panel{grid-area:panel;overflow-y:auto;min-height:0;background:var(--panel);overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
   padding:16px max(16px,env(safe-area-inset-right,0px)) 28px max(16px,env(safe-area-inset-left,0px))}
 nav.tabs{grid-area:tabs;display:grid;grid-template-columns:repeat(5,1fr);background:var(--panel);border-top:1px solid var(--line);
   padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
@@ -221,7 +234,11 @@ details.more[open] summary::before{content:"– "}
 .tour .meta{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 /* Karte */
-.leaflet-container{font:inherit;background:var(--chip)}
+.leaflet-container{font:inherit;background:var(--chip);touch-action:none}
+.attr{position:absolute;right:calc(8px + env(safe-area-inset-right,0px));bottom:8px;z-index:500;display:flex;align-items:center;gap:6px;flex-direction:row-reverse}
+.attr button{width:24px;height:24px;border-radius:50%;border:0;background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--muted);font:600 12px/1 var(--f-body);cursor:pointer;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
+.attr span{background:var(--panel);color:var(--muted);font-size:11px;padding:4px 8px;border-radius:6px;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
+.attr a{color:inherit}
 .leaflet-tile-pane{filter:saturate(.85)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}}
 :root[data-theme="dark"] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
@@ -629,13 +646,20 @@ function localHourKey(d) { const z = n => String(n).padStart(2, "0"); return `${
 const windchill = T => T > 15 ? T : -9.8 + 1.4205 * T; // gefühlt bei 80 km/h Fahrtwind
 
 /* ========== Karte ========== */
-const map = L.map("map", { zoomControl: false, attributionControl: true }).setView([51.0, 10.4], 6);
-L.control.zoom({ position: "topright" }).addTo(map);
+const map = L.map("map", { zoomControl: false, attributionControl: false, preferCanvas: true, tap: false, zoomSnap: 0.5, wheelPxPerZoomLevel: 90, bounceAtZoomLimits: false }).setView([51.0, 10.4], 6);
+(() => { // Quellenangabe für OpenStreetMap (Pflicht) – klein als ©-Knopf
+  const el = document.createElement("div"); el.className = "attr";
+  el.innerHTML = '<button type="button" aria-label="Kartenquelle anzeigen" aria-expanded="false">©</button><span hidden>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende</span>';
+  const b = el.querySelector("button"), t = el.querySelector("span");
+  b.addEventListener("click", e => { e.stopPropagation(); t.hidden = !t.hidden; b.setAttribute("aria-expanded", String(!t.hidden)); });
+  L.DomEvent.disableClickPropagation(el);
+  document.getElementById("map").appendChild(el);
+})();
 const dark = matchMedia("(prefers-color-scheme: dark)");
 let tiles;
 function setTiles() {
   if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
+  tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, keepBuffer: 4, updateWhenZooming: false, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(map);
 }
 setTiles(); dark.addEventListener?.("change", setTiles);
 const routeLayer = L.layerGroup().addTo(map), markLayer = L.layerGroup().addTo(map), candLayer = L.layerGroup().addTo(map);
@@ -653,20 +677,26 @@ function mkIcon(kind, label) {
 function drawRoute(rt) {
   routeLayer.clearLayers();
   if (!rt || !rt.coords?.length) return;
-  L.polyline(rt.coords, { color: css("--road"), weight: 9, opacity: .95, lineJoin: "round" }).addTo(routeLayer);
-  L.polyline(rt.coords, { color: css("--lane"), weight: 4.5, opacity: 1, lineJoin: "round" }).addTo(routeLayer);
+  const pts = thin(rt.coords, 0.03);
+  L.polyline(pts, { color: css("--road"), weight: 9, opacity: .95, lineJoin: "round", smoothFactor: 1.5, interactive: false }).addTo(routeLayer);
+  L.polyline(pts, { color: css("--lane"), weight: 4.5, opacity: 1, lineJoin: "round", smoothFactor: 1.5, interactive: false }).addTo(routeLayer);
 }
 function fit(coords) { if (coords?.length) map.fitBounds(L.latLngBounds(coords), { padding: [30, 30] }); }
 
 /* ========== UI-Grundgerüst ========== */
 let TAB = "route";
+const SCROLL = { _nomap: false };
 function setTab(t) {
+  if (t === TAB && t !== "tours") { $("#panel").scrollTo({ top: 0, behavior: "smooth" }); return; }
+  SCROLL[TAB] = $("#panel").scrollTop;
   TAB = t;
   $$("#tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   $$(".view").forEach(v => v.classList.toggle("on", v.id === "v-" + t));
   $("#shell").classList.toggle("nomap", t === "garage" || t === "log");
-  $("#panel").scrollTop = 0;
-  setTimeout(() => map.invalidateSize(), 60);
+  const nomapBefore = SCROLL._nomap;
+  $("#panel").scrollTop = SCROLL[t] || 0;
+  SCROLL._nomap = $("#shell").classList.contains("nomap");
+  if (nomapBefore !== SCROLL._nomap) requestAnimationFrame(() => map.invalidateSize({ pan: false }));
   if (t === "tours") renderTours();
   if (t === "garage") renderGarage();
   if (t === "log") renderLog(); else renderPending($("#pendingSlot"));
@@ -1430,6 +1460,10 @@ $("#m-add").addEventListener("click", () => {
   $("#m-km").value = ""; $("#m-title").value = ""; $("#manual").open = false;
   save(); renderLog(); toast(`${nf0.format(km)} km eingetragen.`);
 });
+
+/* ========== App-Gefühl ========== */
+["gesturestart", "gesturechange"].forEach(ev => document.addEventListener(ev, e => { if (!e.target.closest?.("#map")) e.preventDefault(); }, { passive: false }));
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 
 /* ========== Start ========== */
 renderBikePill();
