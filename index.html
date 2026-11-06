@@ -17,155 +17,222 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
-/* Layout: Straßenkarte – Panel links (mobil unten), Karte rechts (mobil oben). Route gezeichnet wie eine Bundesstraße: roter Rand, gelbe Füllung. */
+/* Layout: kompakte Karte oben, darüber schiebt sich ein abgerundetes Bedienblatt (mobil); Desktop: Blatt links, Karte rechts.
+   Identität: Bundesstraße – rote Fahrbahn, gelber Mittelstreifen. */
 :root{
-  --paper:#E9ECE5; --panel:#F7F8F4; --ink:#1E2320; --muted:#5D6760; --line:#D2D8CF; --chip:#E3E7E0;
-  --road:#B8322A; --lane:#EDB520; --scenic:#2C7549; --warn:#B86A0B; --bad:#B8322A; --head:#1E2320; --headfg:#E9ECE5;
+  --bg:#EEF0EC; --card:#FFFFFF; --ink:#151918; --muted:#687069; --line:#E2E5E0; --chip:#EEF0EC; --chip2:#E4E7E2;
+  --road:#C2362D; --lane:#EDB520; --scenic:#2E7D4F; --warn:#B86A0B; --bad:#C2362D; --head:#151918; --headfg:#F2F4F0;
+  --onroad:#FFFFFF; --shadow:0 1px 2px rgb(20 25 22 / .06),0 4px 14px rgb(20 25 22 / .06);
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-num:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --r:16px;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --paper:#131715; --panel:#1B201D; --ink:#E6EAE4; --muted:#97A199; --line:#2D3430; --chip:#252B27;
-  --road:#E0574B; --lane:#F1C443; --scenic:#5DB27F; --warn:#E39A3B; --bad:#EC6A5E; --head:#0B0E0C; --headfg:#E6EAE4; color-scheme:dark}}
+  --bg:#0E1110; --card:#181C1A; --ink:#ECEFEA; --muted:#98A19A; --line:#262B28; --chip:#212623; --chip2:#2A302C;
+  --road:#E5564A; --lane:#F1C443; --scenic:#5DB27F; --warn:#E39A3B; --bad:#EC6A5E; --head:#0E1110; --headfg:#ECEFEA;
+  --onroad:#FFFFFF; --shadow:0 1px 2px rgb(0 0 0 / .3); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --paper:#131715; --panel:#1B201D; --ink:#E6EAE4; --muted:#97A199; --line:#2D3430; --chip:#252B27;
-  --road:#E0574B; --lane:#F1C443; --scenic:#5DB27F; --warn:#E39A3B; --bad:#EC6A5E; --head:#0B0E0C; --headfg:#E6EAE4; color-scheme:dark}
+  --bg:#0E1110; --card:#181C1A; --ink:#ECEFEA; --muted:#98A19A; --line:#262B28; --chip:#212623; --chip2:#2A302C;
+  --road:#E5564A; --lane:#F1C443; --scenic:#5DB27F; --warn:#E39A3B; --bad:#EC6A5E; --head:#0E1110; --headfg:#ECEFEA;
+  --onroad:#FFFFFF; --shadow:0 1px 2px rgb(0 0 0 / .3); color-scheme:dark}
 
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
 html{-webkit-text-size-adjust:100%;touch-action:manipulation}
 *{-webkit-tap-highlight-color:transparent}
-button,.chip,.seg,nav.tabs,.btn,label.check,.brand{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button,.chip,.seg,nav.tabs,.btn,label.check,.brand,.opt{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 button{touch-action:manipulation}
-body{background:var(--paper);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
 button,input,select{font:inherit;color:inherit}
 input,select{font-size:16px}
-.btn,.chip,.seg button,nav.tabs button,.iconbtn{transition:transform .08s ease,background-color .15s ease}
-.btn:active,.chip:active,.seg button:active,.iconbtn:active{transform:scale(.97)}
-@media (prefers-reduced-motion:reduce){.btn:active,.chip:active,.seg button:active,.iconbtn:active{transform:none}}
-.shell{display:grid;height:100dvh;grid-template-areas:"head" "map" "panel" "tabs";grid-template-rows:auto 40dvh 1fr auto;grid-template-columns:100%}
+.btn,.chip,.seg button,nav.tabs button,.iconbtn,.mapbtn{transition:transform .08s ease,background-color .15s ease,color .15s ease}
+.btn:active,.chip:active,.seg button:active,.iconbtn:active,.mapbtn:active{transform:scale(.96)}
+@media (prefers-reduced-motion:reduce){.btn:active,.chip:active,.seg button:active,.iconbtn:active,.mapbtn:active{transform:none}}
+
+/* Grundgerüst */
+.shell{display:grid;height:100dvh;grid-template-areas:"head" "map" "panel" "tabs";grid-template-rows:auto 26dvh 1fr auto;grid-template-columns:100%;transition:grid-template-rows .28s ease}
+.shell.bigmap{grid-template-rows:auto 58dvh 1fr auto}
 .shell.nomap{grid-template-rows:auto 0 1fr auto}
 .shell.nomap #map{visibility:hidden}
+@media (prefers-reduced-motion:reduce){.shell{transition:none}}
 header{grid-area:head;display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:calc(env(safe-area-inset-top,0px) + 10px) max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px));
-  background:var(--head);color:var(--headfg)}
-.brand{font:italic 700 26px/1 var(--f-display);letter-spacing:.02em;text-transform:uppercase;display:flex;align-items:center;gap:10px}
-.brand svg{flex:none}
-.brand small{font:500 12px/1.2 var(--f-body);font-style:normal;letter-spacing:.04em;text-transform:none;opacity:.7}
-.bikepill{font:600 13px/1 var(--f-body);background:transparent;border:1px solid color-mix(in srgb,var(--headfg) 35%,transparent);color:var(--headfg);border-radius:99px;padding:7px 12px;cursor:pointer;white-space:nowrap;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
-#map{grid-area:map;min-height:0;background:var(--chip);z-index:0}
-.panel{grid-area:panel;overflow-y:auto;min-height:0;background:var(--panel);overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
-  padding:16px max(16px,env(safe-area-inset-right,0px)) 28px max(16px,env(safe-area-inset-left,0px))}
-nav.tabs{grid-area:tabs;display:grid;grid-template-columns:repeat(5,1fr);background:var(--panel);border-top:1px solid var(--line);
-  padding:0 env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
-nav.tabs button{background:none;border:0;padding:9px 2px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--muted);font:600 11.5px/1 var(--f-body);letter-spacing:.02em;position:relative}
-nav.tabs button svg{width:22px;height:22px}
+  padding:calc(env(safe-area-inset-top,0px) + 8px) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));
+  background:var(--head);color:var(--headfg);z-index:2}
+.brand{font:italic 700 22px/1 var(--f-display);letter-spacing:.03em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.brand svg{flex:none;width:24px;height:24px}
+.bikepill{font:600 13px/1 var(--f-body);background:color-mix(in srgb,var(--headfg) 10%,transparent);border:0;color:var(--headfg);border-radius:99px;padding:8px 12px;cursor:pointer;white-space:nowrap;max-width:52vw;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
+.bikepill svg{width:16px;height:16px;flex:none}
+#map{grid-area:map;min-height:0;background:var(--chip);z-index:0;position:relative}
+.mapbtn{position:absolute;z-index:500;right:calc(10px + env(safe-area-inset-right,0px));top:10px;width:36px;height:36px;border-radius:12px;border:0;background:color-mix(in srgb,var(--card) 92%,transparent);color:var(--ink);display:grid;place-items:center;box-shadow:0 2px 8px rgb(0 0 0 / .2);cursor:pointer}
+.mapbtn svg{width:18px;height:18px}
+.mapbtn.fitbtn{top:52px}
+.panel{grid-area:panel;overflow-y:auto;min-height:0;background:var(--bg);overscroll-behavior:contain;-webkit-overflow-scrolling:touch;position:relative;z-index:1;
+  margin-top:-18px;border-radius:20px 20px 0 0;box-shadow:0 -6px 18px rgb(0 0 0 / .12);
+  padding:8px max(14px,env(safe-area-inset-right,0px)) 24px max(14px,env(safe-area-inset-left,0px))}
+.panel::before{content:"";display:block;width:36px;height:4px;border-radius:2px;background:var(--chip2);margin:0 auto 12px}
+.shell.nomap .panel{margin-top:0;border-radius:0;box-shadow:none}
+.shell.nomap .panel::before{display:none}
+nav.tabs{grid-area:tabs;display:grid;grid-template-columns:repeat(5,1fr);background:var(--card);border-top:1px solid var(--line);z-index:2;
+  padding:4px env(safe-area-inset-right,0px) calc(env(safe-area-inset-bottom,0px) + 2px) env(safe-area-inset-left,0px)}
+nav.tabs button{background:none;border:0;padding:4px 2px 6px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--muted);font:600 11px/1 var(--f-body);letter-spacing:.01em;position:relative}
+nav.tabs button svg{width:22px;height:22px;padding:4px 14px;box-sizing:content-box;border-radius:99px;transition:background-color .2s ease}
 nav.tabs button[aria-selected="true"]{color:var(--ink)}
-nav.tabs button[aria-selected="true"]::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;background:var(--road);border-radius:0 0 3px 3px}
-nav.tabs .dot{position:absolute;top:6px;right:calc(50% - 18px);width:8px;height:8px;border-radius:50%;background:var(--road)}
+nav.tabs button[aria-selected="true"] svg{background:color-mix(in srgb,var(--road) 16%,transparent);color:var(--road)}
+nav.tabs .dot{position:absolute;top:4px;right:calc(50% - 22px);width:8px;height:8px;border-radius:50%;background:var(--road);box-shadow:0 0 0 2px var(--card)}
 @media (min-width:960px){
-  .shell,.shell.nomap{grid-template-areas:"head map" "tabs map" "panel map";grid-template-columns:440px 1fr;grid-template-rows:auto auto 1fr}
+  .shell,.shell.nomap,.shell.bigmap{grid-template-areas:"head map" "tabs map" "panel map";grid-template-columns:460px 1fr;grid-template-rows:auto auto 1fr}
   .shell.nomap #map{visibility:visible}
-  nav.tabs{border-top:0;border-bottom:1px solid var(--line);padding:0}
-  nav.tabs button{flex-direction:row;justify-content:center;padding:13px 2px;font-size:13px}
-  nav.tabs button svg{width:18px;height:18px}
-  nav.tabs button[aria-selected="true"]::before{top:auto;bottom:-1px;border-radius:3px 3px 0 0}
-  .panel{border-right:1px solid var(--line)}
+  .mapbtn.sizebtn{display:none}
+  .mapbtn.fitbtn{top:10px}
+  nav.tabs{border-top:0;border-bottom:1px solid var(--line);padding:4px 0}
+  nav.tabs button{flex-direction:row;justify-content:center;padding:8px 2px;font-size:13px;gap:2px}
+  nav.tabs button svg{width:18px;height:18px;padding:4px 8px}
+  .panel,.shell.nomap .panel{margin-top:0;border-radius:0;box-shadow:none;padding-top:16px;border-right:1px solid var(--line)}
+  .panel::before{display:none}
 }
 
-h2{font:700 28px/1.05 var(--f-display);text-transform:uppercase;letter-spacing:.01em;margin:0 0 4px;text-wrap:balance}
-h3{font:700 17px/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.04em;margin:0 0 10px;color:var(--muted)}
-.lede{color:var(--muted);margin:0 0 16px;max-width:60ch}
-.view{display:none;flex-direction:column;gap:18px}
+/* Typo & Bausteine */
+h2{font:700 24px/1.15 var(--f-body);letter-spacing:-.01em;margin:0;text-wrap:balance}
+h3{font:600 12px/1.2 var(--f-body);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px 4px;color:var(--muted)}
+.lede{color:var(--muted);margin:2px 0 0;max-width:60ch;font-size:14px}
+.view{display:none;flex-direction:column;gap:14px}
 .view.on{display:flex}
+.vhead{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;padding:0 4px}
 .group{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px}
+.card.flush{padding:0;overflow:hidden}
 .sep{border:0;border-top:1px solid var(--line);margin:2px 0}
 label.lab{font:600 12px/1 var(--f-body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
 .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
 .row>.field{flex:1 1 140px}
 input[type=text],input[type=number],input[type=date],input[type=datetime-local],input[type=month],select{
-  width:100%;min-width:0;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;outline:none}
+  width:100%;min-width:0;background:var(--chip);border:1px solid transparent;border-radius:12px;padding:11px 12px;outline:none;transition:border-color .15s ease,background-color .15s ease}
+input:focus,select:focus{border-color:var(--road);background:var(--card)}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--lane);outline-offset:2px}
-.place{position:relative;display:flex;gap:6px}
-.place .pin{flex:none;width:28px;display:grid;place-items:center;font:700 14px/1 var(--f-display)}
+input::placeholder{color:var(--muted);opacity:.85}
+
+/* Wohin – Start/Ziel wie in einer Navi-App */
+.places{position:relative;display:flex;flex-direction:column;gap:8px}
+.places::before{content:"";position:absolute;left:13px;top:24px;bottom:24px;border-left:2px dotted var(--chip2);pointer-events:none}
+.place{position:relative;display:flex;gap:8px;align-items:center}
+.place .pin{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 14px/1 var(--f-display);background:var(--ink);color:var(--card);z-index:1}
+.place[data-role="ziel"] .pin{background:var(--road);color:var(--onroad)}
+.place[data-role="via"] .pin{background:var(--card);color:var(--muted);border:2px solid var(--chip2);font-size:12px}
 .place input{flex:1}
-.ac{position:absolute;left:34px;right:0;top:calc(100% + 4px);background:var(--panel);border:1px solid var(--line);border-radius:8px;z-index:1000;box-shadow:0 10px 24px rgb(0 0 0 / .18);overflow:hidden}
-.ac button{display:block;width:100%;text-align:left;background:none;border:0;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line)}
+.ac{position:absolute;left:36px;right:0;top:calc(100% + 4px);background:var(--card);border-radius:12px;z-index:1000;box-shadow:0 12px 32px rgb(0 0 0 / .22);overflow:hidden}
+.ac button{display:block;width:100%;text-align:left;background:none;border:0;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--line)}
 .ac button:last-child{border-bottom:0}
 .ac button:hover,.ac button:focus{background:var(--chip)}
 .ac small{color:var(--muted);display:block}
-.iconbtn{flex:none;width:40px;border:1px solid var(--line);background:var(--paper);border-radius:8px;cursor:pointer;display:grid;place-items:center;color:var(--muted)}
+.iconbtn{flex:none;width:44px;height:44px;border:0;background:var(--chip);border-radius:12px;cursor:pointer;display:grid;place-items:center;color:var(--muted)}
 .iconbtn:hover{color:var(--ink)}
 .iconbtn svg{width:18px;height:18px}
+.addvia{align-self:flex-start;margin-left:36px;background:none;border:0;color:var(--road);font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px}
+.addvia svg{width:16px;height:16px}
 
-.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--chip);border-radius:10px;padding:3px;gap:3px}
-.seg button{border:0;background:none;border-radius:8px;padding:9px 6px;font-weight:600;cursor:pointer;color:var(--muted)}
-.seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0 / .12)}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{border:1px solid var(--line);background:var(--paper);border-radius:99px;padding:7px 12px;cursor:pointer;font-weight:500;font-size:14px}
-.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+/* Fahrstil-Karten */
+.styles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.styles button{border:2px solid transparent;background:var(--chip);border-radius:14px;padding:12px;text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+.styles button svg{width:26px;height:26px;color:var(--muted)}
+.styles button b{font-weight:700;font-size:16px}
+.styles button small{color:var(--muted);font-size:12.5px;line-height:1.25}
+.styles button[aria-pressed="true"]{border-color:var(--road);background:color-mix(in srgb,var(--road) 8%,var(--card))}
+.styles button[aria-pressed="true"] svg{color:var(--road)}
+
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--chip);border-radius:12px;padding:3px;gap:3px}
+.seg button{border:0;background:none;border-radius:10px;padding:9px 4px;font-weight:600;cursor:pointer;color:var(--muted);font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0 / .14)}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:2px 14px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:0;background:var(--chip);border-radius:99px;padding:8px 13px;cursor:pointer;font-weight:600;font-size:14px;color:var(--muted)}
+.chip[aria-pressed="true"]{background:var(--scenic);color:#fff}
+
+/* Einstellungs-Zeilen */
+.opts{display:flex;flex-direction:column}
+.opt{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:50px;padding:6px 0;border-top:1px solid var(--line)}
+.opt:first-child{border-top:0}
+.opt>span{display:flex;align-items:center;gap:10px;font-weight:500}
+.opt>span svg{width:20px;height:20px;color:var(--muted);flex:none}
+.opt select,.opt input[type=datetime-local]{width:auto;max-width:56%;padding:8px 10px;text-align:right}
+.opt select{appearance:none;-webkit-appearance:none;padding-right:28px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 15px) 52%,calc(100% - 10px) 52%;background-size:5px 5px;background-repeat:no-repeat}
+input.switch{appearance:none;-webkit-appearance:none;flex:none;width:50px;height:30px;border-radius:99px;background:var(--chip2);position:relative;cursor:pointer;transition:background-color .2s ease;margin:0}
+input.switch::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgb(0 0 0 / .3);transition:transform .2s ease}
+input.switch:checked{background:var(--scenic)}
+input.switch:checked::after{transform:translateX(20px)}
 .check{display:flex;align-items:center;gap:10px;cursor:pointer;padding:2px 0}
-.check input{width:20px;height:20px;accent-color:var(--road)}
-input[type=range]{width:100%;accent-color:var(--road)}
-.rangeval{font:700 30px/1 var(--f-display)}
+.check input:not(.switch){width:20px;height:20px;accent-color:var(--road)}
 
-.btn{border:0;border-radius:10px;padding:13px 16px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
-.btn.primary{background:var(--road);color:#fff}
-.btn.primary:disabled{opacity:.6;cursor:progress}
-.btn.dark{background:var(--ink);color:var(--paper)}
-.btn.ghost{background:var(--chip);color:var(--ink)}
-.btn.small{padding:8px 12px;font-size:14px;border-radius:8px}
+/* Fahrzeit-Regler */
+.dur{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.rangeval{font:700 40px/1 var(--f-display);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--road);height:28px}
+
+.btn{border:0;border-radius:14px;padding:14px 16px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;font-size:15px}
+.btn.primary{background:var(--road);color:var(--onroad);box-shadow:0 4px 14px color-mix(in srgb,var(--road) 35%,transparent)}
+.btn.primary:disabled{opacity:.7;cursor:progress}
+.btn.dark{background:var(--ink);color:var(--card)}
+.btn.ghost{background:var(--chip);color:var(--ink);font-weight:600}
+.btn.small{padding:9px 12px;font-size:14px;border-radius:10px}
 .btn svg{width:18px;height:18px}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}
 .btnrow .btn{flex:1 1 auto}
+.cta{position:sticky;bottom:-24px;z-index:5;margin:0 -14px -24px;padding:10px 14px calc(24px + 4px);background:linear-gradient(to bottom,transparent,var(--bg) 22px)}
+.cta .btn{width:100%}
 .linkbtn{background:none;border:0;padding:0;color:var(--road);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
-.status{font-size:14px;color:var(--muted);min-height:1.2em}
+.status{font-size:14px;color:var(--muted);min-height:0;padding:0 4px}
+.status:empty{display:none}
 .status.err{color:var(--bad)}
-.busy{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600;background:var(--chip);border-radius:8px;padding:9px 12px}
+.busy{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:600;background:var(--chip);border-radius:12px;padding:10px 12px}
 
-/* Ergebnis */
-.result{display:flex;flex-direction:column;gap:16px;border-top:3px solid var(--ink);padding-top:16px}
-.rhead{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
-.rhead h2{font-size:24px}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.stat{padding:10px 10px 9px;border-right:1px solid var(--line);min-width:0}
-.stat:last-child{border-right:0}
-.stat b{display:block;font:500 18px/1.1 var(--f-num);font-variant-numeric:tabular-nums;white-space:nowrap}
-.stat span{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.curvebar{display:flex;gap:3px;margin-top:5px}
-.curvebar i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+/* Ergebnis ersetzt die Planung, bis „Ändern“ getippt wird */
+.view:has(.result):not(.editing) .planform{display:none}
+.result{display:flex;flex-direction:column;gap:12px}
+.rhead{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:0 4px}
+.rhead h2{font-size:22px;min-width:0}
+.rhead .btn{flex:none}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.stat{min-width:0;text-align:center;padding:4px 2px}
+.stat b{display:block;font:700 26px/1.05 var(--f-display);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.curvebar{display:flex;gap:3px;margin:5px auto 0;max-width:56px}
+.curvebar i{flex:1;height:4px;border-radius:2px;background:var(--chip2)}
 .curvebar i.on{background:var(--road)}
+.rnote{font-size:13px;color:var(--muted);margin:10px 0 0;text-align:center}
 .stops{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
-.stops li{display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)}
-.stops li:last-child{border-bottom:0}
+.stops li{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+.stops li:first-child{border-top:0;padding-top:0}
 .stops .k{font:500 12px/1 var(--f-num);color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
 .stops .nm{min-width:0}
 .stops .nm b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stops .nm small{color:var(--muted)}
-.stops .x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:18px;padding:4px 6px}
-.badge{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:700 13px/1 var(--f-display);color:#fff;background:var(--ink)}
-.badge.hl{background:var(--scenic)}
-.badge.fuel{background:var(--warn)}
-.badge.via{background:var(--muted)}
+.stops .x{background:var(--chip);border:0;color:var(--muted);cursor:pointer;font-size:16px;width:30px;height:30px;border-radius:50%;line-height:1}
+.badge{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 13px/1 var(--f-display);color:var(--card);background:var(--ink)}
+.badge.hl{background:var(--scenic);color:#fff}
+.badge.fuel{background:var(--warn);color:#fff}
+.badge.via{background:var(--muted);color:var(--card)}
 .badge svg{width:14px;height:14px}
-.wx{border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.wx .verdict{padding:10px 12px;font-weight:600;display:flex;gap:10px;align-items:center}
+.wx .verdict{font-weight:600;display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:12px;margin-bottom:10px}
+.wx .verdict svg{width:20px;height:20px;flex:none}
 .wx .verdict.ok{background:color-mix(in srgb,var(--scenic) 14%,transparent)}
 .wx .verdict.warn{background:color-mix(in srgb,var(--warn) 16%,transparent)}
 .wx .verdict.bad{background:color-mix(in srgb,var(--bad) 15%,transparent)}
-.wxtable{overflow-x:auto}
-.wx table{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
-.wx th,.wx td{padding:7px 10px;text-align:right;border-top:1px solid var(--line);white-space:nowrap}
-.wx th:first-child,.wx td:first-child{text-align:left}
-.wx th{font-weight:600;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
-.note{font-size:13.5px;color:var(--muted)}
+.wxrow{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.wxc{text-align:center;padding:8px 2px;border-radius:12px;background:var(--chip);min-width:0}
+.wxc small{display:block;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+.wxc b{display:block;font:700 22px/1.1 var(--f-display);font-variant-numeric:tabular-nums}
+.wxc span{display:block;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.wxc span.rain{color:var(--road);font-weight:600}
+.note{font-size:13.5px;color:var(--muted);margin:8px 0 0}
 .legs{display:flex;flex-direction:column;gap:8px}
-.gmaps{background:var(--ink);color:var(--paper)}
-.callout{border-left:3px solid var(--lane);background:var(--chip);padding:10px 12px;border-radius:0 8px 8px 0;font-size:14px}
-details.more summary{cursor:pointer;font-weight:600;color:var(--muted);list-style:none}
+.gmaps{background:var(--road);color:var(--onroad);box-shadow:0 4px 14px color-mix(in srgb,var(--road) 35%,transparent)}
+.callout{background:color-mix(in srgb,var(--lane) 16%,var(--card));padding:10px 12px;border-radius:12px;font-size:13.5px}
+.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:8px}
+.actions button{border:0;background:var(--card);box-shadow:var(--shadow);border-radius:14px;padding:10px 4px 9px;display:flex;flex-direction:column;align-items:center;gap:5px;font-weight:600;font-size:12.5px;cursor:pointer;color:var(--ink)}
+.actions button svg{width:20px;height:20px;color:var(--road)}
+details.more summary{cursor:pointer;font-weight:600;color:var(--muted);list-style:none;margin-top:10px}
 details.more summary::-webkit-details-marker{display:none}
 details.more summary::before{content:"+ "}
 details.more[open] summary::before{content:"– "}
@@ -174,85 +241,91 @@ details.more[open] summary::before{content:"– "}
 .cand span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Garage */
-.bike{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--paper)}
-.bike.active{border-color:var(--ink)}
-.bikehead{display:flex;justify-content:space-between;gap:10px;padding:14px 14px 12px;align-items:flex-start}
-.bikehead h2{font-size:24px}
-.odo{font:500 22px/1 var(--f-num);font-variant-numeric:tabular-nums;letter-spacing:.02em;background:var(--ink);color:var(--paper);padding:6px 9px;border-radius:6px;white-space:nowrap}
+.bike{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.bikehead{display:flex;justify-content:space-between;gap:10px;padding:16px 16px 10px;align-items:flex-start}
+.bikehead h2{font-size:22px}
+.odo{font:500 20px/1 var(--f-num);font-variant-numeric:tabular-nums;letter-spacing:.02em;background:var(--ink);color:var(--card);padding:7px 9px;border-radius:8px;white-space:nowrap}
 .odo small{font:500 11px var(--f-body);opacity:.7;margin-left:4px}
-.bikemeta{padding:0 14px 12px;color:var(--muted);font-size:14px;display:flex;gap:14px;flex-wrap:wrap}
+.bikemeta{padding:0 16px 12px;color:var(--muted);font-size:13.5px;display:flex;gap:6px;flex-wrap:wrap}
+.bikemeta span{background:var(--chip);border-radius:99px;padding:4px 10px}
 .items{border-top:1px solid var(--line)}
-.item{padding:11px 14px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}
+.item{padding:12px 16px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center}
 .item:last-child{border-bottom:0}
 .item .nm{font-weight:600}
 .item .rem{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .item .rem.warn{color:var(--warn);font-weight:600}
 .item .rem.bad{color:var(--bad);font-weight:600}
-.bar{grid-column:1/-1;height:5px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar{grid-column:1/-1;height:6px;background:var(--chip);border-radius:3px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--scenic);border-radius:3px}
 .bar i.warn{background:var(--warn)}
 .bar i.bad{background:var(--bad)}
 .item details{grid-column:1/-1}
 .item details summary{font-size:13px;color:var(--muted);cursor:pointer}
 .item .edit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
-.bikefoot{padding:12px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);align-items:flex-end}
+.bikefoot{padding:12px 16px 14px;display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);align-items:flex-end}
 .bikefoot .field{flex:1 1 150px}
-.empty{border:1.5px dashed var(--line);border-radius:12px;padding:22px 16px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:12px;align-items:center}
-.form{border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--paper)}
+.empty{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:26px 16px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:10px;align-items:center}
+.empty b{color:var(--ink);font-size:16px}
+.form{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;display:flex;flex-direction:column;gap:12px}
 
 /* Logbuch */
 .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.kpi{border:1px solid var(--line);border-radius:10px;padding:12px}
-.kpi b{display:block;font:500 26px/1.1 var(--f-num);font-variant-numeric:tabular-nums}
-.kpi span{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.challenge{border-radius:12px;padding:14px;background:var(--head);color:var(--headfg);display:flex;flex-direction:column;gap:8px}
-.challenge .t{font:700 20px/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em}
-.challenge .track{height:10px;border-radius:5px;background:color-mix(in srgb,var(--headfg) 18%,transparent);overflow:hidden}
-.challenge .track i{display:block;height:100%;background:repeating-linear-gradient(90deg,var(--lane) 0 18px,transparent 18px 26px)}
+.kpi{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px}
+.kpi b{display:block;font:700 30px/1.05 var(--f-display);font-variant-numeric:tabular-nums}
+.kpi span{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.challenge{border-radius:var(--r);padding:16px;background:linear-gradient(135deg,#1F2522,#151918);color:#F2F4F0;display:flex;flex-direction:column;gap:10px}
+.challenge .t{font:700 22px/1 var(--f-display);text-transform:uppercase;letter-spacing:.03em}
+.challenge .track{height:10px;border-radius:5px;background:rgb(255 255 255 / .14);overflow:hidden}
+.challenge .track i{display:block;height:100%;background:repeating-linear-gradient(90deg,#EDB520 0 18px,transparent 18px 26px)}
 .challenge small{opacity:.75;font-variant-numeric:tabular-nums}
-.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
-.bdg{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:10px 6px;border-radius:10px;border:1px solid var(--line);font-size:12.5px;line-height:1.2}
-.bdg .plate{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;border:3px solid var(--line);font:700 17px/1 var(--f-display);color:var(--muted)}
+.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.bdg{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:12px 6px;border-radius:14px;background:var(--card);box-shadow:var(--shadow);font-size:12.5px;line-height:1.2}
+.bdg .plate{width:50px;height:50px;border-radius:50%;display:grid;place-items:center;border:3px solid var(--chip2);font:700 17px/1 var(--f-display);color:var(--muted)}
 .bdg.got .plate{border-color:var(--road);color:var(--road);background:color-mix(in srgb,var(--lane) 22%,transparent)}
 .bdg:not(.got){opacity:.55}
 .bdg b{font-weight:600}
-.entries{display:flex;flex-direction:column}
-.entry{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);align-items:center}
+.bdg .note{margin:0;font-size:11.5px}
+.entries{display:flex;flex-direction:column;background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:2px 14px}
+.entries:has(.empty){background:none;box-shadow:none;padding:0}
+.entry{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);align-items:center}
+.entry:last-child{border-bottom:0}
 .entry .d{font:500 12.5px/1.2 var(--f-num);color:var(--muted)}
 .entry .t{min-width:0}
 .entry .t b{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .entry .t small{color:var(--muted)}
-.entry .km{font:500 15px/1 var(--f-num);font-variant-numeric:tabular-nums;text-align:right}
-.pending{border:2px solid var(--lane);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb,var(--lane) 10%,var(--panel))}
-.pending .q{font-weight:600}
+.entry .km{font:700 17px/1 var(--f-display);font-variant-numeric:tabular-nums;text-align:right}
+.pending{border:2px solid var(--lane);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb,var(--lane) 10%,var(--card))}
+.pending .q{font-weight:700}
 .pending .row input{max-width:120px}
+#pendingSlot:not(:empty){margin-bottom:14px}
 
 /* Touren */
-.tour{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;background:var(--paper)}
+.tour{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px;display:flex;flex-direction:column;gap:8px}
 .tour .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
-.tour b{font:700 20px/1.1 var(--f-display);text-transform:uppercase;letter-spacing:.02em}
+.tour b{font:700 18px/1.2 var(--f-body)}
+.tour .top .meta{flex:none;background:var(--chip);border-radius:99px;padding:3px 9px;font-size:12px;font-weight:600}
 .tour .meta{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 /* Karte */
 .leaflet-container{font:inherit;background:var(--chip);touch-action:none}
-.attr{position:absolute;right:calc(8px + env(safe-area-inset-right,0px));bottom:8px;z-index:500;display:flex;align-items:center;gap:6px;flex-direction:row-reverse}
-.attr button{width:24px;height:24px;border-radius:50%;border:0;background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--muted);font:600 12px/1 var(--f-body);cursor:pointer;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
-.attr span{background:var(--panel);color:var(--muted);font-size:11px;padding:4px 8px;border-radius:6px;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
+.attr{position:absolute;right:calc(8px + env(safe-area-inset-right,0px));bottom:26px;z-index:500;display:flex;align-items:center;gap:6px;flex-direction:row-reverse}
+.attr button{width:22px;height:22px;border-radius:50%;border:0;background:color-mix(in srgb,var(--card) 85%,transparent);color:var(--muted);font:600 11px/1 var(--f-body);cursor:pointer;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
+.attr span{background:var(--card);color:var(--muted);font-size:11px;padding:4px 8px;border-radius:6px;box-shadow:0 1px 4px rgb(0 0 0 / .25)}
 .attr a{color:inherit}
-.leaflet-tile-pane{filter:saturate(.85)}
+@media (min-width:960px){.attr{bottom:8px}}
+.leaflet-tile-pane{filter:saturate(.8)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}}
 :root[data-theme="dark"] .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6)}
 .mk{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 14px/1 var(--f-display);border:2px solid #fff;box-shadow:0 2px 6px rgb(0 0 0 / .35)}
 .mk svg{width:14px;height:14px}
-.maphint{position:absolute;left:10px;bottom:10px;z-index:500;background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:13px;box-shadow:0 2px 8px rgb(0 0 0 / .2);max-width:calc(100% - 20px)}
-#mapwrap{position:relative}
 
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:10px;z-index:3000;font-weight:500;box-shadow:0 8px 24px rgb(0 0 0 / .3);max-width:calc(100% - 32px)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--card);padding:11px 16px;border-radius:14px;z-index:3000;font-weight:600;box-shadow:0 8px 24px rgb(0 0 0 / .3);max-width:calc(100% - 32px)}
 @media (min-width:960px){.toast{bottom:24px}}
-.spin{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;display:inline-block}
+.spin{width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .8s linear infinite;display:inline-block;flex:none}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}
-.foot{font-size:12.5px;color:var(--muted)}
+#x-saveform:empty{display:none}
+.foot{font-size:12px;color:var(--muted);padding:0 4px}
 .foot a{color:inherit}
 </style>
 </head>
@@ -260,113 +333,115 @@ details.more[open] summary::before{content:"– "}
 <div class="shell" id="shell">
   <header>
     <div class="brand">
-      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path d="M3 25 C 9 25, 9 6, 15 6 S 21 25, 27 25" fill="none" stroke="#B8322A" stroke-width="5" stroke-linecap="round"/><path d="M3 25 C 9 25, 9 6, 15 6 S 21 25, 27 25" fill="none" stroke="#EDB520" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/></svg>
-      <div>Schräglage<br><small>Motorrad-Touren planen</small></div>
+      <svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 25 C 9 25, 9 6, 15 6 S 21 25, 27 25" fill="none" stroke="#C2362D" stroke-width="5" stroke-linecap="round"/><path d="M3 25 C 9 25, 9 6, 15 6 S 21 25, 27 25" fill="none" stroke="#EDB520" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/></svg>
+      <span>Schräglage</span>
     </div>
-    <button class="bikepill" id="bikepill" type="button">Kein Motorrad</button>
+    <button class="bikepill" id="bikepill" type="button">Motorrad anlegen</button>
   </header>
 
-  <div id="map"></div>
+  <div id="map">
+    <button class="mapbtn sizebtn" id="mapsize" type="button" aria-label="Karte vergrößern" title="Karte vergrößern"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+    <button class="mapbtn fitbtn" id="mapfit" type="button" aria-label="Auf Route zoomen" title="Auf Route zoomen" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+  </div>
 
   <main class="panel" id="panel">
     <div id="pendingSlot"></div>
 
     <!-- ROUTE -->
     <section class="view on" id="v-route" aria-labelledby="h-route">
-      <div>
-        <h2 id="h-route">Route planen</h2>
-        <p class="lede">Von A nach B, kurvig oder schnell. Tippe auf die Karte, um Start, Ziel und Zwischenziele zu setzen.</p>
+      <div class="planform group">
+        <div class="vhead"><div><h2 id="h-route">Wohin geht's?</h2><p class="lede">Suchen oder auf die Karte tippen.</p></div></div>
+        <div class="card">
+          <div class="places">
+            <div class="place" data-role="start"><span class="pin">A</span><input type="text" id="r-start" placeholder="Start" autocomplete="off"><button class="iconbtn" type="button" data-gps="r-start" title="Mein Standort" aria-label="Mein Standort als Start"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button></div>
+            <div id="r-vias" class="group" style="gap:8px"></div>
+            <div class="place" data-role="ziel"><span class="pin">B</span><input type="text" id="r-ziel" placeholder="Ziel" autocomplete="off"><button class="iconbtn" type="button" id="r-swap" title="Start und Ziel tauschen" aria-label="Start und Ziel tauschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg></button></div>
+            <button class="addvia" type="button" id="r-addvia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Zwischenziel</button>
+          </div>
+        </div>
+
+        <div class="styles" id="r-style">
+          <button type="button" data-v="kurvig" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 20c4 0 4-6 8-6s4-8 8-8"/></svg><b>Kurvig</b><small>Kleine Straßen, viel Schräglage</small></button>
+          <button type="button" data-v="schnell" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 18 20 6M14 6h6v6"/></svg><b>Schnell</b><small>Kürzeste Fahrzeit</small></button>
+        </div>
+
+        <div class="card">
+          <h3>Highlights unterwegs</h3>
+          <div class="chips" id="r-hl"></div>
+          <div class="opts" style="margin-top:6px">
+            <label class="opt" for="r-hln"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 2 3 6.6 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21.2l1.5-7L2 9.4l7-.8z"/></svg>Stopps</span><select id="r-hln"><option value="0">keine</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
+            <label class="opt" for="r-mw"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 5 21M16 3l3 18M12 4v3M12 11v3M12 18v2"/></svg>Autobahn meiden</span><input type="checkbox" class="switch" id="r-mw" checked></label>
+            <label class="opt" for="r-toll"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M14.5 9a3 3 0 1 0 0 6M8 11h5M8 13.5h5"/></svg>Maut meiden</span><input type="checkbox" class="switch" id="r-toll"></label>
+            <label class="opt" for="r-fuel"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M6 9h6M14 11h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg>Tankstopps planen</span><input type="checkbox" class="switch" id="r-fuel" checked></label>
+            <label class="opt" for="r-tank"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-5"/></svg>Tank beim Start</span><select id="r-tank"><option value="1">voll</option><option value=".75">¾</option><option value=".5">halb</option><option value=".25">¼</option></select></label>
+            <label class="opt" for="r-time"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Abfahrt</span><input type="datetime-local" id="r-time"></label>
+          </div>
+        </div>
+        <div class="cta"><button class="btn primary" type="button" id="r-go">Route berechnen</button></div>
       </div>
-      <div class="group">
-        <div class="place" data-role="start"><span class="pin">A</span><input type="text" id="r-start" placeholder="Start suchen" autocomplete="off"><button class="iconbtn" type="button" data-gps="r-start" title="Mein Standort" aria-label="Mein Standort als Start"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button></div>
-        <div id="r-vias" class="group"></div>
-        <div class="place" data-role="ziel"><span class="pin">B</span><input type="text" id="r-ziel" placeholder="Ziel suchen" autocomplete="off"><button class="iconbtn" type="button" id="r-swap" title="Start und Ziel tauschen" aria-label="Start und Ziel tauschen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg></button></div>
-        <div><button class="linkbtn" type="button" id="r-addvia">+ Zwischenziel</button></div>
-      </div>
-      <div class="group">
-        <label class="lab">Fahrstil</label>
-        <div class="seg" id="r-style"><button type="button" data-v="kurvig" aria-pressed="true">Kurvig</button><button type="button" data-v="schnell" aria-pressed="false">Schnell</button></div>
-        <label class="check"><input type="checkbox" id="r-mw" checked> Autobahn meiden</label>
-        <label class="check"><input type="checkbox" id="r-toll"> Maut meiden</label>
-      </div>
-      <div class="group">
-        <label class="lab">Highlights unterwegs</label>
-        <div class="chips" id="r-hl"></div>
-        <div class="row"><div class="field"><label class="lab" for="r-hln">Anzahl Stopps</label><select id="r-hln"><option value="0">keine</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></div>
-        <div class="field"><label class="lab" for="r-time">Abfahrt</label><input type="datetime-local" id="r-time"></div></div>
-      </div>
-      <div class="group">
-        <label class="check"><input type="checkbox" id="r-fuel" checked> Tankstopps einplanen</label>
-        <div class="field"><label class="lab" for="r-tank">Tank beim Start</label><select id="r-tank"><option value="1">voll (vorher tanken)</option><option value=".75">¾</option><option value=".5">halb</option><option value=".25">¼</option></select></div>
-      </div>
-      <button class="btn primary" type="button" id="r-go">Route berechnen</button>
       <div class="status" id="r-status" role="status"></div>
       <div id="r-result"></div>
     </section>
 
     <!-- RUNDTOUR -->
     <section class="view" id="v-loop" aria-labelledby="h-loop">
-      <div>
-        <h2 id="h-loop">Rundtour</h2>
-        <p class="lede">Sag, wie lange du fahren willst. Schräglage baut eine kurvige Runde mit Stopps an Aussichtspunkten, Cafés oder Burgen und bringt dich zurück zum Start.</p>
+      <div class="planform group">
+        <div class="vhead"><div><h2 id="h-loop">Rundtour</h2><p class="lede">Eine kurvige Runde mit Stopps, zurück zum Start.</p></div></div>
+        <div class="card">
+          <div class="places"><div class="place" data-role="start"><span class="pin">A</span><input type="text" id="l-start" placeholder="Startpunkt" autocomplete="off"><button class="iconbtn" type="button" data-gps="l-start" title="Mein Standort" aria-label="Mein Standort als Start"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button></div></div>
+        </div>
+        <div class="card group">
+          <div class="dur"><label class="lab" for="l-hours">Fahrzeit</label><span class="note" id="l-hours-km" style="margin:0">ca. 110 km</span></div>
+          <span class="rangeval" id="l-hours-v">2 h</span>
+          <input type="range" id="l-hours" min="1" max="6" step="0.5" value="2">
+          <label class="lab" style="margin-top:4px">Richtung</label>
+          <div class="seg" id="l-dir"><button type="button" data-v="" aria-pressed="true">Egal</button><button type="button" data-v="0" aria-pressed="false">N</button><button type="button" data-v="90" aria-pressed="false">O</button><button type="button" data-v="180" aria-pressed="false">S</button><button type="button" data-v="270" aria-pressed="false">W</button></div>
+        </div>
+        <div class="card">
+          <h3>Highlights unterwegs</h3>
+          <div class="chips" id="l-hl"></div>
+          <div class="opts" style="margin-top:6px">
+            <label class="opt" for="l-hln"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 2 3 6.6 7 .8-5.2 4.8 1.5 7L12 17.6 5.7 21.2l1.5-7L2 9.4l7-.8z"/></svg>Stopps</span><select id="l-hln"><option value="0">keine</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select></label>
+            <label class="opt" for="l-mw"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3 5 21M16 3l3 18M12 4v3M12 11v3M12 18v2"/></svg>Autobahn meiden</span><input type="checkbox" class="switch" id="l-mw" checked></label>
+            <label class="opt" for="l-fuel"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M6 9h6M14 11h2a2 2 0 0 1 2 2v4a1.5 1.5 0 0 0 3 0V8l-3-3"/></svg>Tankstopps planen</span><input type="checkbox" class="switch" id="l-fuel" checked></label>
+            <label class="opt" for="l-tank"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18a8 8 0 1 1 16 0"/><path d="m12 18 4-5"/></svg>Tank beim Start</span><select id="l-tank"><option value="1">voll</option><option value=".75">¾</option><option value=".5">halb</option><option value=".25">¼</option></select></label>
+            <label class="opt" for="l-time"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Abfahrt</span><input type="datetime-local" id="l-time"></label>
+          </div>
+        </div>
+        <div class="cta"><button class="btn primary" type="button" id="l-go">Rundtour erstellen</button></div>
       </div>
-      <div class="group">
-        <div class="place" data-role="start"><span class="pin">A</span><input type="text" id="l-start" placeholder="Startpunkt suchen" autocomplete="off"><button class="iconbtn" type="button" data-gps="l-start" title="Mein Standort" aria-label="Mein Standort als Start"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button></div>
-      </div>
-      <div class="group">
-        <label class="lab" for="l-hours">Fahrzeit</label>
-        <div class="row" style="align-items:center"><span class="rangeval" id="l-hours-v">2 h</span><span class="note" id="l-hours-km">ca. 110 km</span></div>
-        <input type="range" id="l-hours" min="1" max="6" step="0.5" value="2">
-      </div>
-      <div class="group">
-        <label class="lab">Richtung</label>
-        <div class="seg" id="l-dir"><button type="button" data-v="" aria-pressed="true">Egal</button><button type="button" data-v="0" aria-pressed="false">Nord</button><button type="button" data-v="90" aria-pressed="false">Ost</button><button type="button" data-v="180" aria-pressed="false">Süd</button><button type="button" data-v="270" aria-pressed="false">West</button></div>
-      </div>
-      <div class="group">
-        <label class="lab">Highlights</label>
-        <div class="chips" id="l-hl"></div>
-        <div class="row"><div class="field"><label class="lab" for="l-hln">Anzahl Stopps</label><select id="l-hln"><option value="0">keine</option><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select></div>
-        <div class="field"><label class="lab" for="l-time">Abfahrt</label><input type="datetime-local" id="l-time"></div></div>
-      </div>
-      <div class="group">
-        <label class="check"><input type="checkbox" id="l-mw" checked> Autobahn meiden</label>
-        <label class="check"><input type="checkbox" id="l-fuel" checked> Tankstopps einplanen</label>
-        <div class="field"><label class="lab" for="l-tank">Tank beim Start</label><select id="l-tank"><option value="1">voll (vorher tanken)</option><option value=".75">¾</option><option value=".5">halb</option><option value=".25">¼</option></select></div>
-      </div>
-      <div class="btnrow"><button class="btn primary" type="button" id="l-go">Rundtour erstellen</button></div>
       <div class="status" id="l-status" role="status"></div>
       <div id="l-result"></div>
     </section>
 
     <!-- TOUREN -->
     <section class="view" id="v-tours" aria-labelledby="h-tours">
-      <div><h2 id="h-tours">Meine Touren</h2><p class="lede">Gespeicherte Routen. Über „Teilen“ bekommen Freunde einen Link und planen die Tour mit ihrem eigenen Motorrad nach.</p></div>
+      <div class="vhead"><div><h2 id="h-tours">Meine Touren</h2><p class="lede">Gespeichert und mit Freunden teilbar.</p></div></div>
       <div id="tourlist" class="group"></div>
     </section>
 
     <!-- GARAGE -->
     <section class="view" id="v-garage" aria-labelledby="h-garage">
-      <div><h2 id="h-garage">Garage</h2><p class="lede">Dein Motorrad, Kilometerstand und was als Nächstes fällig ist. Tankinhalt und Verbrauch nutzt die Tankplanung.</p></div>
+      <div class="vhead"><div><h2 id="h-garage">Garage</h2><p class="lede">Kilometerstand und was als Nächstes fällig ist.</p></div></div>
       <div id="bikes" class="group"></div>
       <div id="addbike"></div>
-      <hr class="sep">
-      <div class="group">
-        <h3>Daten sichern</h3>
-        <p class="note">Alles wird nur in diesem Browser gespeichert. Mit einer Sicherung nimmst du Garage, Logbuch und Touren auf ein anderes Gerät mit.</p>
+      <div class="card group">
+        <h3 style="margin:0">Daten sichern</h3>
+        <p class="note" style="margin:0">Alles bleibt in diesem Browser. Mit einer Sicherung nimmst du Garage, Logbuch und Touren auf ein anderes Gerät mit.</p>
         <div class="btnrow"><button class="btn ghost small" type="button" id="bk-export">Sicherung herunterladen</button><label class="btn ghost small" for="bk-import" style="cursor:pointer">Sicherung laden</label><input type="file" id="bk-import" accept="application/json" hidden></div>
       </div>
     </section>
 
     <!-- LOGBUCH -->
     <section class="view" id="v-log" aria-labelledby="h-log">
-      <div><h2 id="h-log">Logbuch</h2><p class="lede">Touren, die du nach Google Maps exportierst, landen hier als „geplant“. Danach bestätigst du kurz, ob und wie weit du gefahren bist.</p></div>
+      <div class="vhead"><div><h2 id="h-log">Logbuch</h2><p class="lede">Exportierte Touren bestätigst du hier nach der Fahrt.</p></div></div>
       <div id="logpending" class="group"></div>
       <div id="challenge"></div>
       <div class="kpis" id="kpis"></div>
-      <div class="group"><h3>Abzeichen</h3><div class="badges" id="badges"></div></div>
+      <div><h3>Abzeichen</h3><div class="badges" id="badges"></div></div>
       <div class="group">
-        <h3>Fahrten</h3>
-        <details class="more" id="manual"><summary>Fahrt manuell eintragen</summary>
+        <div class="vhead" style="padding:0 4px"><h3 style="margin:0">Fahrten</h3></div>
+        <details class="more" id="manual" style="padding:0 4px"><summary style="margin:0">Fahrt manuell eintragen</summary>
           <div class="form" style="margin-top:10px">
             <div class="row"><div class="field"><label class="lab" for="m-date">Datum</label><input type="date" id="m-date"></div><div class="field"><label class="lab" for="m-km">Kilometer</label><input type="number" id="m-km" min="1" inputmode="numeric" placeholder="z. B. 85"></div></div>
             <div class="field"><label class="lab" for="m-title">Titel</label><input type="text" id="m-title" placeholder="Feierabendrunde"></div>
@@ -376,7 +451,7 @@ details.more[open] summary::before{content:"– "}
         <div class="entries" id="entries"></div>
       </div>
     </section>
-    <p class="foot" style="margin-top:28px">Kartendaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende · Routing <a href="https://brouter.de" target="_blank" rel="noopener">BRouter</a> · Wetter <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Suche Photon. Fahrzeiten und Wartungsintervalle sind Richtwerte.</p>
+    <p class="foot" style="margin-top:24px">Kartendaten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>-Mitwirkende · Routing <a href="https://brouter.de" target="_blank" rel="noopener">BRouter</a> · Wetter <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Suche Photon. Fahrzeiten und Wartungsintervalle sind Richtwerte.</p>
   </main>
 
   <nav class="tabs" id="tabs" role="tablist">
@@ -769,7 +844,7 @@ $("#r-swap").addEventListener("click", () => { [PLAN.start, PLAN.ziel] = [PLAN.z
 $("#r-addvia").addEventListener("click", () => { PLAN.vias.push(null); renderVias(); $("#r-vias input:last-of-type")?.focus(); });
 function renderVias() {
   const el = $("#r-vias");
-  el.innerHTML = PLAN.vias.map((v, i) => `<div class="place" data-role="via"><span class="pin" style="color:var(--muted)">${i + 1}</span><input type="text" data-i="${i}" placeholder="Zwischenziel suchen" autocomplete="off" value="${esc(v?.name || "")}"><button class="iconbtn" type="button" data-del="${i}" aria-label="Zwischenziel entfernen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("");
+  el.innerHTML = PLAN.vias.map((v, i) => `<div class="place" data-role="via"><span class="pin">${i + 1}</span><input type="text" data-i="${i}" placeholder="Zwischenziel" autocomplete="off" value="${esc(v?.name || "")}"><button class="iconbtn" type="button" data-del="${i}" aria-label="Zwischenziel entfernen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("");
   $$("input", el).forEach(inp => placeInput(inp, p => { PLAN.vias[+inp.dataset.i] = p; drawPlanMarkers(true); }));
   $$("[data-del]", el).forEach(b => b.addEventListener("click", () => { PLAN.vias.splice(+b.dataset.del, 1); renderVias(); drawPlanMarkers(); }));
 }
@@ -791,6 +866,7 @@ map.on("click", async e => {
 function drawPlanMarkers(pan) {
   markLayer.clearLayers(); candLayer.clearLayers();
   const showCur = CUR && ((TAB === "route" && !CUR.loop) || (TAB === "loop" && CUR.loop));
+  $("#mapfit").hidden = !showCur;
   if (showCur) { drawRoute(CUR); drawStops(CUR); return; }
   routeLayer.clearLayers();
   const pts = [];
@@ -1098,40 +1174,50 @@ function renderResult(fitMap = true) {
   let wxHtml = "";
   if (rt.wx?.rows?.length) {
     const v = verdict(rt.wx.rows);
-    wxHtml = `<div class="wx"><div class="verdict ${v.lvl}">${esc(v.txt)}</div><div class="wxtable"><table><thead><tr><th>Unterwegs</th><th>°C</th><th>Fahrtwind</th><th>Regen</th><th>Böen</th></tr></thead><tbody>${rt.wx.rows.map(r => `<tr><td>${r.time.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} · km ${nf0.format(r.km)}</td><td>${nf0.format(r.t)}</td><td>${nf0.format(windchill(r.t))}</td><td>${nf0.format(r.pp ?? 0)} %</td><td>${nf0.format(r.g ?? 0)}</td></tr>`).join("")}</tbody></table></div></div>`;
-  } else if (rt.wx?.far) wxHtml = `<p class="note">Wetter gibt es ab 16 Tage vor Abfahrt.</p>`;
-  else if (rt.wx?.error) wxHtml = `<p class="note">Wetter konnte gerade nicht geladen werden.</p>`;
+    const ico = v.lvl === "ok" ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></svg>';
+    wxHtml = `<div class="card wx"><h3>Wetter unterwegs</h3><div class="verdict ${v.lvl}">${ico}<span>${esc(v.txt)}</span></div><div class="wxrow">${rt.wx.rows.map(r => `<div class="wxc"><small>${r.time.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</small><b>${nf0.format(r.t)}°</b><span>gefühlt ${nf0.format(windchill(r.t))}°</span><span class="${(r.pp ?? 0) >= 40 ? "rain" : ""}">${nf0.format(r.pp ?? 0)} % Regen</span></div>`).join("")}</div></div>`;
+  } else if (rt.wx?.far) wxHtml = `<p class="note" style="padding:0 4px">Wetter gibt es ab 16 Tage vor Abfahrt.</p>`;
+  else if (rt.wx?.error) wxHtml = `<p class="note" style="padding:0 4px">Wetter konnte gerade nicht geladen werden.</p>`;
   let fuelHtml = "";
   const fi = rt.fuelInfo;
   if (fi) {
     const nFuel = rt.stops.filter(s => s.kind === "fuel").length;
-    const rng = `Reichweite ${nf0.format(fi.range)} km${fi.bike ? "" : " (Standardwert – Motorrad in der Garage anlegen)"}, ${nf0.format(fi.reserve)} km Reserve.`;
+    const rng = `Reichweite ${nf0.format(fi.range)} km${fi.bike ? "" : " (Standardwert – Motorrad in der Garage anlegen)"}.`;
     fuelHtml = `<p class="note">${nFuel ? `${nFuel} Tankstopp${nFuel > 1 ? "s" : ""} eingeplant. ` : "Kein Tankstopp nötig. "}${rng}${fi.gap ? " Achtung: In einem Abschnitt wurde keine Tankstelle an der Strecke gefunden." : ""}${fi.error ? " Tankstellen konnten gerade nicht geladen werden." : ""}</p>`;
   }
   const legs = buildLegs(rt);
+  const pinIco = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
   const legHtml = legs.length === 1
-    ? `<a class="btn gmaps" href="${legs[0].url}" target="_blank" rel="noopener" data-export="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.1-7-11.5A7 7 0 0 1 19 9.5C19 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>In Google Maps öffnen</a>`
-    : `<p class="note">Die Tour ist zu lang für einen Google-Maps-Link (max. 9 Zwischenpunkte). Fahr sie in ${legs.length} Etappen:</p>` + legs.map((l, i) => `<a class="btn gmaps" href="${l.url}" target="_blank" rel="noopener" data-export="1">Etappe ${i + 1} · km ${nf0.format(l.from)}–${nf0.format(l.to)}</a>`).join("");
-  const hlRetry = rt.hlFailed ? `<div class="callout">Der Highlight-Dienst ist gerade überlastet, deshalb fehlen Stopps. <button class="linkbtn" type="button" id="x-hlretry">Erneut suchen</button></div>` : "";
-  const candHtml = rt.cands?.length ? `<details class="more"><summary>Weitere Highlights an der Strecke (${rt.cands.length})</summary><div class="candlist">${rt.cands.map((c, i) => `<div class="cand"><span><b>${esc(c.name)}</b> · ${HL[c.type]?.label}</span><button class="btn ghost small" type="button" data-addc="${i}">Hinzufügen</button></div>`).join("")}</div><p class="note">Grüne Punkte auf der Karte lassen sich auch direkt antippen.</p></details>` : "";
+    ? `<a class="btn gmaps" href="${legs[0].url}" target="_blank" rel="noopener" data-export="1">${pinIco}In Google Maps starten</a>`
+    : legs.map((l, i) => `<a class="btn gmaps" href="${l.url}" target="_blank" rel="noopener" data-export="1">${pinIco}Etappe ${i + 1} · km ${nf0.format(l.from)}–${nf0.format(l.to)}</a>`).join("") + `<p class="note" style="margin:0;padding:0 4px">Für Google Maps in ${legs.length} Etappen geteilt (max. 9 Zwischenpunkte pro Link).</p>`;
+  const hlRetry = rt.hlFailed ? `<div class="callout" style="margin-top:10px">Der Highlight-Dienst ist gerade überlastet. <button class="linkbtn" type="button" id="x-hlretry">Erneut suchen</button></div>` : "";
+  const candHtml = rt.cands?.length ? `<details class="more"><summary>Weitere Highlights an der Strecke (${rt.cands.length})</summary><div class="candlist">${rt.cands.map((c, i) => `<div class="cand"><span><b>${esc(c.name)}</b> · ${HL[c.type]?.label}</span><button class="btn ghost small" type="button" data-addc="${i}">Hinzufügen</button></div>`).join("")}</div><p class="note">Grüne Punkte auf der Karte lassen sich auch antippen.</p></details>` : "";
+  const ic = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   slot.innerHTML = `<div class="result">
-    <div class="rhead"><h2>${esc(rt.name)}</h2></div>
+    <div class="rhead"><h2>${esc(rt.name)}</h2><button class="btn ghost small" type="button" id="x-edit">${ic('<path d="M4 20h4L19 9l-4-4L4 16z"/>')}Ändern</button></div>
     ${rt.busy ? `<div class="busy" role="status"><span class="spin"></span> ${esc(rt.busy)}</div>` : ""}
-    <div class="stats">
-      <div class="stat"><b>${nf0.format(rt.km)}</b><span>km</span></div>
-      <div class="stat"><b>${fmtDur(rt.min).replace(" h", "")}</b><span>${rt.min >= 60 ? "Std." : "Fahrzeit"}</span></div>
-      <div class="stat"><b>${nf0.format(rt.ascent)}</b><span>Höhenm.</span></div>
-      <div class="stat"><b title="${nf0.format(rt.curv)} Grad Richtungswechsel pro km">${lvl}/5</b><span>Kurven</span><div class="curvebar">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= lvl ? "on" : ""}"></i>`).join("")}</div></div>
+    <div class="card">
+      <div class="stats">
+        <div class="stat"><b>${nf0.format(rt.km)}</b><span>km</span></div>
+        <div class="stat"><b>${fmtDur(rt.min).replace(" h", "")}</b><span>${rt.min >= 60 ? "Stunden" : "Fahrzeit"}</span></div>
+        <div class="stat"><b>${nf0.format(rt.ascent)}</b><span>Höhenm.</span></div>
+        <div class="stat"><b title="${nf0.format(rt.curv)} Grad Richtungswechsel pro km">${lvl}/5</b><span>Kurven</span><div class="curvebar">${[1, 2, 3, 4, 5].map(i => `<i class="${i <= lvl ? "on" : ""}"></i>`).join("")}</div></div>
+      </div>
+      <p class="rnote">${CURVE_TXT[lvl]}${rt.style === "kurvig" && rt.variants > 1 ? ` · kurvigste von ${rt.variants} Varianten` : ""} · ohne Pausen${rt.fallback ? " · Ersatz-Routing aktiv" : ""}</p>
     </div>
-    <p class="note">${CURVE_TXT[lvl]}${rt.style === "kurvig" && rt.variants > 1 ? ` – die kurvigste von ${rt.variants} Varianten` : ""}. Fahrzeit ohne Pausen.${rt.fallback ? " Ersatz-Routing aktiv, Autobahn/Maut meiden ist dabei nicht garantiert." : ""}</p>
+    <div class="legs">${legHtml}</div>
+    <div class="actions">
+      <button type="button" id="x-save">${ic('<path d="M6 3h12v18l-6-4-6 4z"/>')}Speichern</button>
+      <button type="button" id="x-share">${ic('<path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>')}Teilen</button>
+      <button type="button" id="x-gpx">${ic('<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>')}GPX</button>
+      ${rt.loop ? `<button type="button" id="x-again">${ic('<path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M17 2v4h4"/>')}Andere Runde</button>` : ""}
+    </div>
+    <div id="x-saveform"></div>
     ${wxHtml}
-    <div class="group"><h3>Stopps</h3><ul class="stops">${stopRows}</ul>${fuelHtml}${hlRetry}${candHtml}</div>
-    <div class="group"><h3>Losfahren</h3><div class="legs">${legHtml}</div>
-      ${rt.mw ? `<div class="callout">Google Maps fährt zwischen den Punkten seine eigene Linie. Die Wegpunkte halten dich auf der kurvigen Strecke – stell in Google Maps zusätzlich „Autobahnen vermeiden“ ein.</div>` : ""}
-      <div class="btnrow"><button class="btn ghost small" type="button" id="x-save">Speichern</button><button class="btn ghost small" type="button" id="x-share">Teilen</button><button class="btn ghost small" type="button" id="x-gpx">GPX</button>${rt.loop ? `<button class="btn ghost small" type="button" id="x-again">Neue Variante</button>` : ""}</div>
-      <div id="x-saveform"></div>
-    </div>
+    <div class="card"><h3>Stopps</h3><ul class="stops">${stopRows}</ul>${fuelHtml}${hlRetry}${candHtml}</div>
+    ${rt.mw ? `<div class="callout">Tipp: Stell in Google Maps zusätzlich „Autobahnen vermeiden“ ein. Die Wegpunkte halten dich auf der kurvigen Strecke.</div>` : ""}
   </div>`;
+  $("#x-edit", slot).addEventListener("click", () => { const v = slot.closest(".view"); v.classList.add("editing"); $("#panel").scrollTo({ top: 0, behavior: "smooth" }); });
   $$("[data-rm]", slot).forEach(b => b.addEventListener("click", () => removeStop(+b.dataset.rm)));
   $$("[data-addc]", slot).forEach(b => b.addEventListener("click", () => addHighlight(+b.dataset.addc)));
   $$("[data-export]", slot).forEach(a => a.addEventListener("click", () => logPlanned(rt)));
@@ -1181,8 +1267,8 @@ async function run(which) {
   try {
     const rt = which === "loop" ? await computeLoop(status) : await computeAB(status);
     if (seq !== SEQ) return;
-    CUR = rt; st.textContent = ""; renderResult();
-    setTimeout(() => (which === "loop" ? $("#l-result") : $("#r-result")).scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    CUR = rt; st.textContent = ""; $(which === "loop" ? "#v-loop" : "#v-route").classList.remove("editing"); renderResult();
+    $("#panel").scrollTo({ top: 0 });
     enrich(rt, seq);
   } catch (e) {
     st.className = "status err";
@@ -1210,11 +1296,11 @@ async function shareRoute(rt) {
   const url = location.origin + location.pathname + "#r=" + b64e(serial(rt));
   if (navigator.share) { try { await navigator.share({ title: rt.name, text: `Motorradtour: ${rt.name} (${nf0.format(rt.km)} km)`, url }); return; } catch (e) { if (e.name === "AbortError") return; } }
   try { await navigator.clipboard.writeText(url); toast("Link kopiert – schick ihn deinen Freunden."); }
-  catch (e) { const f = $("#x-saveform"); f.innerHTML = `<div class="field" style="margin-top:8px"><label class="lab" for="x-link">Link zum Teilen</label><input type="text" id="x-link" readonly value="${esc(url)}"></div>`; $("#x-link").select(); }
+  catch (e) { const f = $("#x-saveform"); if (!f) { toast("Link: " + url, 8000); return; } f.innerHTML = `<div class="field card"><label class="lab" for="x-link">Link zum Teilen</label><input type="text" id="x-link" readonly value="${esc(url)}"></div>`; $("#x-link").select(); }
 }
 function saveForm(rt) {
   const f = $("#x-saveform");
-  f.innerHTML = `<div class="row" style="margin-top:8px"><div class="field"><label class="lab" for="x-name">Name der Tour</label><input type="text" id="x-name" value="${esc(rt.name)}"></div><button class="btn dark" type="button" id="x-ok">Speichern</button></div>`;
+  f.innerHTML = `<div class="row card"><div class="field"><label class="lab" for="x-name">Name der Tour</label><input type="text" id="x-name" value="${esc(rt.name)}"></div><button class="btn dark" type="button" id="x-ok">Speichern</button></div>`;
   $("#x-name").focus(); $("#x-name").select();
   $("#x-ok").addEventListener("click", () => {
     rt.name = $("#x-name").value.trim() || rt.name;
@@ -1460,6 +1546,17 @@ $("#m-add").addEventListener("click", () => {
   $("#m-km").value = ""; $("#m-title").value = ""; $("#manual").open = false;
   save(); renderLog(); toast(`${nf0.format(km)} km eingetragen.`);
 });
+
+/* ========== Kartengröße ========== */
+$("#mapsize").addEventListener("click", e => {
+  e.stopPropagation();
+  const big = $("#shell").classList.toggle("bigmap");
+  e.currentTarget.setAttribute("aria-label", big ? "Karte verkleinern" : "Karte vergrößern");
+  e.currentTarget.innerHTML = big ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+  const t0 = performance.now(); const tick = () => { map.invalidateSize({ pan: false }); if (performance.now() - t0 < 340) requestAnimationFrame(tick); else if (CUR) fit(CUR.coords); }; requestAnimationFrame(tick);
+});
+$("#mapfit").addEventListener("click", e => { e.stopPropagation(); if (CUR) fit(CUR.coords); });
+["#mapsize", "#mapfit"].forEach(id => L.DomEvent.disableClickPropagation($(id)));
 
 /* ========== App-Gefühl ========== */
 ["gesturestart", "gesturechange"].forEach(ev => document.addEventListener(ev, e => { if (!e.target.closest?.("#map")) e.preventDefault(); }, { passive: false }));
