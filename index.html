@@ -146,8 +146,9 @@ input::placeholder{color:var(--muted);opacity:.85}
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--chip);border-radius:12px;padding:3px;gap:3px}
 .seg button{border:0;background:none;border-radius:10px;padding:9px 4px;font-weight:600;cursor:pointer;color:var(--muted);font-size:14px}
 .seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0 / .14)}
-.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:2px 14px}
-.chips::-webkit-scrollbar{display:none}
+.chips{display:flex;flex-direction:column;gap:10px}
+.hlg small{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px 2px}
+.chipwrap{display:flex;flex-wrap:wrap;gap:6px}
 .chip{flex:none;border:0;background:var(--chip);border-radius:99px;padding:8px 13px;cursor:pointer;font-weight:600;font-size:14px;color:var(--muted)}
 .chip[aria-pressed="true"]{background:var(--scenic);color:#fff}
 
@@ -478,15 +479,33 @@ const API = {
 const AVG_KURVIG = 52; // km/h auf Landstraße inkl. Ortsdurchfahrten
 
 const HL = {
-  view:   { label: "Aussicht",       short: "A", q: 'nwr["tourism"="viewpoint"]' },
-  castle: { label: "Burg & Schloss", short: "B", q: 'nwr["historic"~"^(castle|fort)$"]["name"]' },
-  pass:   { label: "Pass",           short: "P", q: 'node["mountain_pass"="yes"]' },
-  biker:  { label: "Bikertreff",     short: "M", q: 'nwr["amenity"~"^(cafe|restaurant|pub|biergarten|fast_food)$"]["name"~"[Bb]iker|[Mm]otorrad|[Mm]oto"]' },
-  cafe:   { label: "Café",           short: "C", q: 'nwr["amenity"="cafe"]["name"]' },
-  beer:   { label: "Biergarten",     short: "G", q: 'nwr["amenity"="biergarten"]["name"]' },
-  lake:   { label: "See",            short: "S", q: 'way["natural"="water"]["water"="lake"]["name"]' }
+  // Natur
+  view:     { label: "Aussicht",       short: "A",  q: ['nwr["tourism"="viewpoint"]', 'nwr["man_made"="tower"]["tower:type"="observation"]'] },
+  beach:    { label: "Strand",         short: "St", q: ['nwr["natural"="beach"]', 'nwr["leisure"="beach_resort"]'] },
+  lake:     { label: "Badesee",        short: "S",  q: ['way["natural"="water"]["water"="lake"]["name"]', 'nwr["leisure"="bathing_place"]'] },
+  waterfall:{ label: "Wasserfall",     short: "W",  q: ['nwr["waterway"="waterfall"]'] },
+  pass:     { label: "Pass",           short: "P",  q: ['node["mountain_pass"="yes"]'] },
+  picnic:   { label: "Rastplatz",      short: "Pi", q: ['nwr["tourism"="picnic_site"]'] },
+  // Essen & Trinken
+  cafe:     { label: "Café",           short: "C",  q: ['nwr["amenity"="cafe"]["name"]'] },
+  icecream: { label: "Eisdiele",       short: "E",  q: ['nwr["amenity"="ice_cream"]["name"]', 'nwr["shop"="ice_cream"]["name"]'] },
+  beer:     { label: "Biergarten",     short: "G",  q: ['nwr["amenity"="biergarten"]["name"]'] },
+  inn:      { label: "Gasthof",        short: "R",  q: ['nwr["amenity"="restaurant"]["cuisine"~"regional|german|bavarian"]["name"]', 'nwr["amenity"="restaurant"]["name"~"Gasthof|Gasthaus|Wirtshaus|Landgasthof"]'] },
+  biker:    { label: "Bikertreff",     short: "M",  q: ['nwr["amenity"~"^(cafe|restaurant|pub|biergarten|fast_food)$"]["name"~"[Bb]iker|[Mm]otorrad|[Mm]oto"]', 'nwr["motorcycle"="yes"]["amenity"]'] },
+  // Sehenswert
+  castle:   { label: "Burg & Schloss", short: "B",  q: ['nwr["historic"~"^(castle|fort)$"]["name"]'] },
+  ruins:    { label: "Ruine",          short: "Ru", q: ['nwr["historic"="ruins"]["name"]'] },
+  monastery:{ label: "Kloster",        short: "K",  q: ['nwr["historic"="monastery"]["name"]', 'nwr["amenity"="monastery"]["name"]'] },
+  lighthouse:{label: "Leuchtturm",     short: "L",  q: ['nwr["man_made"="lighthouse"]'] },
+  museum:   { label: "Museum",         short: "Mu", q: ['nwr["tourism"="museum"]["name"]'] },
+  ferry:    { label: "Fähre",          short: "F",  q: ['nwr["amenity"="ferry_terminal"]'] }
 };
-const HL_ORDER = ["view", "castle", "pass", "biker", "cafe", "beer", "lake"];
+const HL_GROUPS = [
+  ["Natur", ["view", "beach", "lake", "waterfall", "pass", "picnic"]],
+  ["Essen & Trinken", ["cafe", "icecream", "beer", "inn", "biker"]],
+  ["Sehenswert", ["castle", "ruins", "monastery", "lighthouse", "museum", "ferry"]]
+];
+const HL_ORDER = HL_GROUPS.flatMap(g => g[1]);
 
 // Marke, Modell, Tank (l), Verbrauch (l/100 km), Ölwechsel/Inspektion (km) – Richtwerte
 const MODELS = [
@@ -627,7 +646,17 @@ const PHOTON_WORDS = {
   pass: [["mountain_pass:yes", "pass"]],
   biker: [["amenity:cafe", "biker"], ["amenity:restaurant", "biker"]],
   beer: [["amenity:biergarten", "biergarten"], ["amenity:biergarten", "keller"]],
-  lake: [["natural:water", "see"]],
+  lake: [["natural:water", "see"], ["leisure:bathing_place", "bad"]],
+  beach: [["natural:beach", "strand"]],
+  waterfall: [["waterway:waterfall", "wasserfall"]],
+  picnic: [["tourism:picnic_site", "rastplatz"]],
+  icecream: [["amenity:ice_cream", "eis"]],
+  inn: [["amenity:restaurant", "gasthof"], ["amenity:restaurant", "gasthaus"]],
+  ruins: [["historic:ruins", "ruine"]],
+  monastery: [["historic:monastery", "kloster"]],
+  lighthouse: [["man_made:lighthouse", "leuchtturm"]],
+  museum: [["tourism:museum", "museum"]],
+  ferry: [["amenity:ferry_terminal", "fähre"]],
   fuel: [["amenity:fuel", "tankstelle"], ["amenity:fuel", "aral"], ["amenity:fuel", "shell"], ["amenity:fuel", "esso"], ["amenity:fuel", "jet"], ["amenity:fuel", "avia"], ["amenity:fuel", "totalenergies"]]
 };
 function bboxStr(p, km) { const n = destPt(p, 0, km)[0], s = destPt(p, 180, km)[0], e = destPt(p, 90, km)[1], w = destPt(p, 270, km)[1]; return `${w.toFixed(4)},${s.toFixed(4)},${e.toFixed(4)},${n.toFixed(4)}`; }
@@ -655,20 +684,31 @@ function elToPoi(e, type) {
   return { lat, lon, name: t.name || (type === "view" ? "Aussichtspunkt" : HL[type].label), type, id: e.type + e.id };
 }
 function classify(t) {
-  if (t.tourism === "viewpoint") return "view";
-  if (t.historic === "castle" || t.historic === "fort") return "castle";
+  const nm = t.name || "";
+  if ((/biker|motorrad|moto/i.test(nm) || t.motorcycle === "yes") && t.amenity) return "biker";
+  if (t.tourism === "viewpoint" || (t.man_made === "tower" && t["tower:type"] === "observation")) return "view";
+  if (t.natural === "beach" || t.leisure === "beach_resort") return "beach";
+  if ((t.natural === "water" && t.water === "lake") || t.leisure === "bathing_place") return "lake";
+  if (t.waterway === "waterfall") return "waterfall";
   if (t.mountain_pass === "yes") return "pass";
-  if (/biker|motorrad|moto/i.test(t.name || "") && t.amenity) return "biker";
+  if (t.tourism === "picnic_site") return "picnic";
+  if (t.amenity === "ice_cream" || t.shop === "ice_cream") return "icecream";
   if (t.amenity === "cafe") return "cafe";
   if (t.amenity === "biergarten") return "beer";
-  if (t.natural === "water") return "lake";
+  if (t.amenity === "restaurant") return "inn";
+  if (t.historic === "castle" || t.historic === "fort") return "castle";
+  if (t.historic === "ruins") return "ruins";
+  if (t.historic === "monastery" || t.amenity === "monastery") return "monastery";
+  if (t.man_made === "lighthouse") return "lighthouse";
+  if (t.tourism === "museum") return "museum";
+  if (t.amenity === "ferry_terminal") return "ferry";
   return null;
 }
 const POI_CACHE = new Map();
 async function poisNear(points, km, types) { // mehrere kleine Suchboxen in einer Abfrage – schnell und schonend
   if (!types.length || !points.length) return [];
   const boxes = points.map(p => bbAround(p, km));
-  const q = `[out:json][timeout:20];(${boxes.map(bb => types.map(t => `${HL[t].q}${bb};`).join("")).join("")});out center 900;`;
+  const q = `[out:json][timeout:20];(${boxes.map(bb => types.flatMap(t => HL[t].q).map(q => `${q}${bb};`).join("")).join("")});out center 900;`;
   if (POI_CACHE.has(q)) return POI_CACHE.get(q);
   let res;
   try {
@@ -788,9 +828,15 @@ function segment(id, onChange) {
 }
 function chips(id, defaults) {
   const el = $(id);
-  el.innerHTML = HL_ORDER.map(k => `<button type="button" class="chip" data-v="${k}" aria-pressed="${defaults.includes(k)}">${HL[k].label}</button>`).join("");
-  el.addEventListener("click", e => { const b = e.target.closest(".chip"); if (b) b.setAttribute("aria-pressed", String(b.getAttribute("aria-pressed") !== "true")); });
-  return () => $$(".chip[aria-pressed=true]", el).map(b => b.dataset.v);
+  el.innerHTML = HL_GROUPS.map(([g, ks]) => `<div class="hlg"><small>${g}</small><div class="chipwrap">${ks.map(k => `<button type="button" class="chip" data-v="${k}" aria-pressed="${defaults.includes(k)}">${HL[k].label}</button>`).join("")}</div></div>`).join("");
+  el._picked = [...defaults];
+  el.addEventListener("click", e => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    const on = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", String(on));
+    el._picked = el._picked.filter(k => k !== b.dataset.v); if (on) el._picked.push(b.dataset.v);
+  });
+  return () => HL_ORDER.filter(k => $(`.chip[data-v="${k}"]`, el).getAttribute("aria-pressed") === "true").sort((a, b) => order(a) - order(b));
+  function order(k) { const i = el._picked?.indexOf(k); return i >= 0 ? i : 99; }
 }
 const getStyle = segment("#r-style", v => { if (v === "kurvig") $("#r-mw").checked = true; });
 const getDir = segment("#l-dir");

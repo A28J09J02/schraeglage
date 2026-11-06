@@ -1,5 +1,5 @@
 // Schräglage – App-Hülle offline bereithalten, damit der Start sofort geht
-const CACHE = "schraeglage-v7";
+const CACHE = "schraeglage-v8";
 const SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css",
   "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"];
