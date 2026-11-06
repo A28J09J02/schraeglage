@@ -1093,7 +1093,7 @@ function chooseHighlights(rt, pois, w) {
   for (let k = 1; k <= w.nHL; k++) {
     const target = L * k / (w.nHL + 1), win = L / (w.nHL + 1) * 0.6;
     const score = p => pref(p.type) * 0.6 + Math.abs(p.along - target) / win + p.off / 2;
-    const opt = pois.filter(p => !chosen.some(x => x.q === p) && Math.abs(p.along - target) < win && p.along > 3 && p.along < L - 3).sort((a, b) => score(a) - score(b))[0];
+    const opt = pois.filter(p => !chosen.some(x => x.q === p) && !chosen.some(x => Math.abs(x.q.along - p.along) < L / (w.nHL + 1) * 0.4) && p.along > 1.5 && p.along < L - 1.5).sort((a, b) => score(a) - score(b))[0];
     if (opt) chosen.push({ q: opt });
   }
   return chosen;
